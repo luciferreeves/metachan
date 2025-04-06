@@ -14,10 +14,9 @@ var Config *types.ServerConfig
 
 func init() {
 	logOptions := types.LogOptions{
-		Timestamp: true,
-		Prefix:    "Config",
-		Level:     types.Error,
-		Fatal:     true,
+		Prefix: "Config",
+		Level:  types.Error,
+		Fatal:  true,
 	}
 
 	if err := godotenv.Load(); err != nil {
