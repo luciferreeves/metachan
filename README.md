@@ -1,15 +1,12 @@
+> [!CAUTION]  
+> I _do not_ provide pre-hosted instances of the MetaChan API. You will need to host your own instance of the API to use it. MetaChan is provided on an "as-is" basis and fetches data from various public sources and projects, some of which may have rate limits, restrictions, and even contain pirated content. The API is intended for personal use only and should not be used for commercial purposes. I do not take any responsibility for any legal issues that may arise from using the API. Please use it at your own risk. I _do not_ condone piracy or illegal distribution of content.
+
 # MetaChan
 
 Welcome to **MetaChan**. MetaChan is an Anime and Manga metadata API that provides a RESTful interface for accessing metadata for various anime and manga titles. MetaChan best integrates with [MyAnimeList](https://myanimelist.net/) and uses **MAL IDs** as the primary identifier for anime and manga titles. [AniList](https://anilist.co/) is also supported partially and will reverse lookup MAL IDs.
 
-> [!WARNING]  
-> I _do not_ provide pre-hosted instances of the MetaChan API. You will need to host your own instance of the API to use it. MetaChan is provided on an "as-is" basis and fetches data from various public sources and projects, some of which may have rate limits, restrictions, and even contain pirated content. The API is intended for personal use only and should not be used for commercial purposes. I do not take any responsibility for any legal issues that may arise from using the API. Please use it at your own risk. I _do not_ condone piracy or illegal distribution of content.
-
-> [!CAUTION]
-> The API is still under **heavy development** and the `main` branch contains breaking changes. A lot of features are still missing and the Documentation is not complete. There are _no releases_ yet. If you still want to use the API, you can build it from the source code or use the [Dockerfile](Dockerfile) to build a Docker image. The API is not production ready yet and should be used at your own risk. I am not responsible for any data loss or damage caused by using the API.
-
 <div align="center">
-<img src="https://i.redd.it/rg4mpacfm1wz.png" width="800">
+<img src="https://i.redd.it/rg4mpacfm1wz.png" width="730">
 
 [![](https://tokei.rs/b1/github/luciferreeves/metachan?category=code&style=for-the-badge)](https://github.com/luciferreeves/metachan) [![](https://tokei.rs/b1/github/luciferreeves/metachan?showLanguage=true&languageRank=1&label=Top%20Language&style=for-the-badge)](https://github.com/luciferreeves/metachan) ![GitHub License](https://img.shields.io/github/license/luciferreeves/metachan?style=for-the-badge) ![GitHub repo size](https://img.shields.io/github/repo-size/luciferreeves/metachan?style=for-the-badge) ![GitHub Repo stars](https://img.shields.io/github/stars/luciferreeves/metachan?style=for-the-badge)
 
@@ -53,7 +50,9 @@ Now you can start the development server by running:
 make dev
 ```
 
-Or you can build the binary and run it directly:
+If you wish to run it for production use, build the binary first:
+> [!WARNING]
+> The API is still under **heavy development** and the `main` branch contains breaking changes. A lot of features are still missing and the Documentation is not complete. There are _no releases_ yet. If you still want to use the API, you can build it from the source code or use the [Dockerfile](Dockerfile) to build a Docker image. The API is not production ready yet and should be used at your own risk. I am not responsible for any data loss or damage caused by using the API.
 
 ```bash
 make build
@@ -90,5 +89,5 @@ This will run the Docker image and expose the API on port `3000`. You can change
 
 ## API Documentation
 
-> [!CAUTION]
+> [!NOTE]
 > Documentation for this API is **not yet available**. The API is still under heavy development and the endpoints are subject to change. This [README](README.md) file will be updated with the API documentation once it is available.
