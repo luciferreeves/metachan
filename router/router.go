@@ -1,8 +1,14 @@
 package router
 
-import "github.com/gofiber/fiber/v2"
+import (
+	"metachan/controllers"
+
+	"github.com/gofiber/fiber/v2"
+)
 
 func Initialize(router *fiber.App) {
+	// Health
+	router.Get("/health", controllers.HealthStatus)
 
 	// 404 Default
 	router.Use(func(c *fiber.Ctx) error {
