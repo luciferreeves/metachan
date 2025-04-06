@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"metachan/config"
 	"metachan/database"
+	"metachan/middleware"
 	"metachan/router"
 	"metachan/tasks"
 	"metachan/types"
@@ -12,7 +13,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/helmet"
-	fiberLogger "github.com/gofiber/fiber/v2/middleware/logger"
 )
 
 func main() {
@@ -29,7 +29,7 @@ func main() {
 		MaxAge:        86400,
 	}))
 	app.Use(helmet.New())
-	app.Use(fiberLogger.New())
+	app.Use(middleware.HTTPLogger())
 
 	// Initialize the router
 	router.Initialize(app)
