@@ -234,3 +234,49 @@ func (tm *TaskManager) StopAllTasks() {
 		})
 	}
 }
+
+func (tm *TaskManager) GetTaskStatus(taskName string) *types.TaskStatus {
+	tm.Mutex.Lock()
+	task, registered := tm.Tasks[taskName]
+	_, running := tm.Tickers[taskName]
+	tm.Mutex.Unlock()
+
+	var lastRun, nextRun *time.Time
+	var logEntry entities.TaskLog
+
+	if err := tm.Database.Where("task_name = ?", taskName).Order("executed_at desc").First(&logEntry).Error; err == nil {
+		lastRun = &logEntry.ExecutedAt
+		if logEntry.Status == "error" {
+			lastRun = nil
+		}
+
+		if task.Interval > 0 {
+			next := logEntry.ExecutedAt.Add(task.Interval)
+			nextRun = &next
+		}
+	} else if err != gorm.ErrRecordNotFound {
+		logger.Log(fmt.Sprintf("Error fetching task log for %s: %v", taskName, err), types.LogOptions{
+			Level:  types.Error,
+			Prefix: "TaskManager",
+		})
+	}
+
+	return &types.TaskStatus{
+		Registered: registered,
+		Running:    running,
+		LastRun:    lastRun,
+		NextRun:    nextRun,
+	}
+}
+
+func (tm *TaskManager) GetAllTaskStatuses() map[string]*types.TaskStatus {
+	statuses := make(map[string]*types.TaskStatus)
+	tm.Mutex.Lock()
+	for name := range tm.Tasks {
+		tm.Mutex.Unlock() // temporarily unlock to avoid deadlock / get task status
+		statuses[name] = tm.GetTaskStatus(name)
+		tm.Mutex.Lock()
+	}
+	tm.Mutex.Unlock()
+	return statuses
+}
