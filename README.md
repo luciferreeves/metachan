@@ -8,6 +8,13 @@ Welcome to **MetaChan**. MetaChan is an Anime and Manga metadata API that provid
 > [!CAUTION]
 > The API is still under **heavy development** and the `main` branch contains breaking changes. A lot of features are still missing and the Documentation is not complete. There are _no releases_ yet. If you still want to use the API, you can build it from the source code or use the [Dockerfile](Dockerfile) to build a Docker image. The API is not production ready yet and should be used at your own risk. I am not responsible for any data loss or damage caused by using the API.
 
+<div align="center">
+<img src="https://i.redd.it/rg4mpacfm1wz.png" width="800">
+
+[![](https://tokei.rs/b1/github/luciferreeves/metachan?category=code&style=for-the-badge)](https://github.com/luciferreeves/metachan) [![](https://tokei.rs/b1/github/luciferreeves/metachan?showLanguage=true&languageRank=1&label=Top%20Language&style=for-the-badge)](https://github.com/luciferreeves/metachan) ![GitHub License](https://img.shields.io/github/license/luciferreeves/metachan?style=for-the-badge) ![GitHub repo size](https://img.shields.io/github/repo-size/luciferreeves/metachan?style=for-the-badge) ![GitHub Repo stars](https://img.shields.io/github/stars/luciferreeves/metachan?style=for-the-badge)
+
+</div>
+
 ## Deployment Options
 
 You can deploy this API using either a [Docker](https://www.docker.com) container or by running it directly with [Go](https://go.dev). The API supports multiple database systems including [SQLite](https://www.sqlite.org/index.html), [PostgreSQL](https://www.postgresql.org/), [MySQL](https://www.mysql.com/), and [Microsoft SQL Server](https://www.microsoft.com/en-us/sql-server/sql-server-downloads).
