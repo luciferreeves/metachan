@@ -34,7 +34,17 @@ If you wish to use Docker, you will also need to install [Docker](https://www.do
 
 You might also need to install [Git](https://git-scm.com/) if you want to clone the repository.
 
-### Building/Running the API
+### Configuring Environment Variables
+
+You can configure the environment variables by creating a `.env` file in the root directory of the project. The example `.env` file contains all the available environment variables and their default values. You can modify these values to suit your needs.
+The following environment variables are available:
+| Variable Name | Description | Default Value |
+| -------------- | ----------- | ------------- |
+| `DB_DRIVER` | The database driver to use. Supported drivers are `sqlite`, `postgres`, `mysql`, and `sqlserver`. The options are **case-sensitive**. | `sqlite` |
+| `DSN` | The Data Source Name (DSN) for the database connection. This is used to connect to the database. The format of the DSN depends on the database driver you are using. Following are the DSN formats for each driver:<br><br>• **_sqlite_**: `metachan.db` or `/path/to/metachan.db`<br>• **_postgres_**: `host=localhost port=5432 user=postgres password=postgres dbname=metachan sslmode=disable`<br>• **_mysql_**: `root:password@tcp(localhost:3306)/metachan`<br>• **_sqlserver_**: `sqlserver://localhost:1433?database=metachan` | `metachan.db` |
+| `PORT` | The port to run the API on. | `3000` |
+
+### Starting Development Server
 
 After you have installed the prerequisites, [forked](https://github.com/luciferreeves/metachan/fork) the repository and cloned it to your local machine, start by installing the dependencies:
 
@@ -50,26 +60,18 @@ Now you can start the development server by running:
 make dev
 ```
 
-If you wish to run it for production use, build the binary first:
+### Building for Production
+
 > [!WARNING]
 > The API is still under **heavy development** and the `main` branch contains breaking changes. A lot of features are still missing and the Documentation is not complete. There are _no releases_ yet. If you still want to use the API, you can build it from the source code or use the [Dockerfile](Dockerfile) to build a Docker image. The API is not production ready yet and should be used at your own risk. I am not responsible for any data loss or damage caused by using the API.
 
+Building for production use is easy. To build for production, run the following commands:
 ```bash
 make build
 make run
 ```
 
 This will build the binary and run it. The API will be available at `http://localhost:3000` by default.
-
-### Configuring Environment Variables
-
-You can configure the environment variables by creating a `.env` file in the root directory of the project. The example `.env` file contains all the available environment variables and their default values. You can modify these values to suit your needs.
-The following environment variables are available:
-| Variable Name | Description | Default Value |
-| -------------- | ----------- | ------------- |
-| `DB_DRIVER` | The database driver to use. Supported drivers are `sqlite`, `postgres`, `mysql`, and `sqlserver`. The options are **case-sensitive**. | `sqlite` |
-| `DSN` | The Data Source Name (DSN) for the database connection. This is used to connect to the database. The format of the DSN depends on the database driver you are using. Following are the DSN formats for each driver:<br><br>• **_sqlite_**: `metachan.db` or `/path/to/metachan.db`<br>• **_postgres_**: `host=localhost port=5432 user=postgres password=postgres dbname=metachan sslmode=disable`<br>• **_mysql_**: `root:password@tcp(localhost:3306)/metachan`<br>• **_sqlserver_**: `sqlserver://localhost:1433?database=metachan` | `metachan.db` |
-| `PORT` | The port to run the API on. | `3000` |
 
 ### Docker
 
@@ -90,4 +92,4 @@ This will run the Docker image and expose the API on port `3000`. You can change
 ## API Documentation
 
 > [!NOTE]
-> Documentation for this API is **not yet available**. The API is still under heavy development and the endpoints are subject to change. This [README](README.md) file will be updated with the API documentation once it is available.
+> Documentation for this API is **not complete**. The API is still under heavy development and the endpoints are subject to change. This [README](README.md) file will be updated with the API documentation once it is available.
