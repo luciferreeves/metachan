@@ -79,6 +79,9 @@ func (tm *TaskManager) StartTask(taskName string) {
 		return
 	}
 
+	// Stop existing scheduled execution if any
+	tm.StopTask(taskName)
+
 	shouldExec, err := tm.shouldExecuteTask(taskName, task.Interval)
 	if err != nil {
 		logger.Log(fmt.Sprintf("Error checking execution condition for task %s: %v", taskName, err), types.LogOptions{
@@ -88,44 +91,74 @@ func (tm *TaskManager) StartTask(taskName string) {
 		return
 	}
 
-	if !shouldExec {
-		logger.Log(fmt.Sprintf("Task %s skipped execution - not due yet", taskName), types.LogOptions{
-			Level:  types.Info,
-			Prefix: "TaskManager",
-		})
-		return
-	}
-
-	// Stop existing scheduled execution if any
-	tm.StopTask(taskName)
-
-	// Execute the task immediately
-	go func() {
-		if err := task.Execute(); err != nil {
-			tm.logTaskExecution(taskName, "error", err.Error())
-			logger.Log(fmt.Sprintf("Task %s execution failed: %v", taskName, err), types.LogOptions{
-				Level:  types.Error,
-				Prefix: "TaskManager",
-			})
-		} else {
-			task.LastRun = time.Now()
-			tm.logTaskExecution(taskName, "success", "Task executed successfully")
-			logger.Log(fmt.Sprintf("Task %s executed successfully", taskName), types.LogOptions{
-				Level:  types.Success,
-				Prefix: "TaskManager",
-			})
-		}
-	}()
-
-	// Schedule subsequent executions
-	ticker := time.NewTicker(task.Interval)
 	doneChan := make(chan bool)
 	tm.Mutex.Lock()
-	tm.Tickers[taskName] = ticker
 	tm.Done[taskName] = doneChan
 	tm.Mutex.Unlock()
 
 	go func() {
+		// Execute immediately if due
+		if shouldExec {
+			if err := task.Execute(); err != nil {
+				tm.logTaskExecution(taskName, "error", err.Error())
+				logger.Log(fmt.Sprintf("Task %s execution failed: %v", taskName, err), types.LogOptions{
+					Level:  types.Error,
+					Prefix: "TaskManager",
+				})
+			} else {
+				task.LastRun = time.Now()
+				tm.logTaskExecution(taskName, "success", "Task executed successfully")
+				logger.Log(fmt.Sprintf("Task %s executed successfully", taskName), types.LogOptions{
+					Level:  types.Success,
+					Prefix: "TaskManager",
+				})
+			}
+		} else {
+			// Calculate time until next execution
+			var lastLog entities.TaskLog
+			var initialDelay time.Duration = task.Interval
+
+			if err := tm.Database.Where("task_name = ?", taskName).Order("executed_at desc").First(&lastLog).Error; err == nil {
+				elapsed := time.Since(lastLog.ExecutedAt)
+				if elapsed < task.Interval {
+					initialDelay = task.Interval - elapsed
+				}
+			}
+
+			logger.Log(fmt.Sprintf("Task %s will run in %v", taskName, initialDelay), types.LogOptions{
+				Level:  types.Info,
+				Prefix: "TaskManager",
+			})
+
+			// Wait for initial delay before first execution
+			select {
+			case <-time.After(initialDelay):
+				if err := task.Execute(); err != nil {
+					tm.logTaskExecution(taskName, "error", err.Error())
+					logger.Log(fmt.Sprintf("Task %s execution failed: %v", taskName, err), types.LogOptions{
+						Level:  types.Error,
+						Prefix: "TaskManager",
+					})
+				} else {
+					task.LastRun = time.Now()
+					tm.logTaskExecution(taskName, "success", "Task executed successfully")
+					logger.Log(fmt.Sprintf("Task %s executed successfully", taskName), types.LogOptions{
+						Level:  types.Success,
+						Prefix: "TaskManager",
+					})
+				}
+			case <-doneChan:
+				return
+			}
+		}
+
+		// Create ticker for subsequent executions
+		ticker := time.NewTicker(task.Interval)
+		tm.Mutex.Lock()
+		tm.Tickers[taskName] = ticker
+		tm.Mutex.Unlock()
+
+		// Regular ticker loop
 		for {
 			select {
 			case <-ticker.C:
