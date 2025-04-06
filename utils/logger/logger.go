@@ -9,6 +9,8 @@ import (
 	"metachan/types"
 )
 
+const prefixWidth = 15
+
 func getTimestamp() string {
 	return time.Now().Format(time.RFC3339)
 }
@@ -61,11 +63,19 @@ func Log(message interface{}, options types.LogOptions) {
 	builder.WriteString(" ")
 
 	if options.Prefix != "" {
+		totalWidth := len(options.Prefix)
+		padding := ""
+
+		if totalWidth < prefixWidth {
+			padding = strings.Repeat(" ", prefixWidth-totalWidth)
+		}
+
 		builder.WriteString(types.Cyan)
 		builder.WriteString("[")
 		builder.WriteString(options.Prefix)
 		builder.WriteString("]")
 		builder.WriteString(types.Reset)
+		builder.WriteString(padding)
 		builder.WriteString(" ")
 	}
 
