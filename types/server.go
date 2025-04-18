@@ -9,8 +9,14 @@ const (
 	SQLServer DatabaseDriver = "sqlserver"
 )
 
+type TMDBConfig struct {
+	APIKey          string
+	ReadAccessToken string
+}
+
 type ServerConfig struct {
 	DatabaseDriver DatabaseDriver
 	DataSourceName string
 	Port           int
+	TMDB           TMDBConfig
 }

@@ -27,6 +27,10 @@ func init() {
 		DatabaseDriver: types.DatabaseDriver(getEnv("DB_DRIVER")),
 		DataSourceName: getEnv("DSN"),
 		Port:           getIntEnv("PORT"),
+		TMDB: types.TMDBConfig{
+			APIKey:          getEnv("TMDB_API_KEY"),
+			ReadAccessToken: getEnv("TMDB_READ_ACCESS_TOKEN"),
+		},
 	}
 
 	switch Config.DatabaseDriver {
@@ -41,6 +45,14 @@ func init() {
 
 	if Config.Port == 0 {
 		logger.Log("Invalid port or port not set", logOptions)
+	}
+
+	if Config.TMDB.APIKey == "" {
+		logger.Log("Invalid TMDB API key or TMDB API key not set", logOptions)
+	}
+
+	if Config.TMDB.ReadAccessToken == "" {
+		logger.Log("Invalid TMDB read access token or TMDB read access token not set", logOptions)
 	}
 
 	logOptions.Level = types.Success
