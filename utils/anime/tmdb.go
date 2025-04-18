@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
 	"metachan/config"
 	"metachan/types"
 	"metachan/utils/logger"
@@ -11,6 +12,76 @@ import (
 	"strings"
 	"time"
 )
+
+// makeRequestWithRetries executes an HTTP request with retries for handling temporary network failures
+func makeRequestWithRetries(req *http.Request, maxRetries int) (*http.Response, error) {
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			// Exponential backoff with jitter for retries
+			backoffTime := time.Duration(math.Pow(1.5, float64(attempt))) * time.Second
+
+			// Updated jitter calculation without using deprecated rand.Seed
+			jitter := time.Duration(rand.Int31n(500)) * time.Millisecond
+
+			sleepTime := backoffTime + jitter
+
+			logger.Log(fmt.Sprintf("TMDB request retry %d/%d after %v due to: %v",
+				attempt, maxRetries, sleepTime, lastErr), types.LogOptions{
+				Level:  types.Debug,
+				Prefix: "TMDB",
+			})
+
+			time.Sleep(sleepTime)
+
+			// Create a fresh request to avoid any issues with reusing the same request
+			newReq, err := http.NewRequest(req.Method, req.URL.String(), nil)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create new request for retry: %w", err)
+			}
+
+			// Copy all headers from the original request
+			for key, values := range req.Header {
+				for _, value := range values {
+					newReq.Header.Add(key, value)
+				}
+			}
+
+			// Set the new retry request as our active request
+			req = newReq
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			// Check if this is a network error that might be temporary
+			if strings.Contains(err.Error(), "connection reset by peer") ||
+				strings.Contains(err.Error(), "EOF") ||
+				strings.Contains(err.Error(), "connection refused") ||
+				strings.Contains(err.Error(), "timeout") {
+				// These are retryable errors
+				continue
+			}
+			// Other errors are not retryable
+			return nil, err
+		}
+
+		// If we got a server error (5xx), retry
+		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
+			lastErr = fmt.Errorf("server error: %s", resp.Status)
+			resp.Body.Close() // Make sure we close the body before we retry
+			continue
+		}
+
+		return resp, nil
+	}
+
+	return nil, fmt.Errorf("failed after %d retries: %w", maxRetries, lastErr)
+}
 
 // normalizeTitle cleans up the anime title for better matching with TMDB
 func normalizeTitle(title string) string {
@@ -80,15 +151,10 @@ func searchTVShowsByTitle(title string, alternativeTitle string, isAdult bool, c
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.Config.TMDB.ReadAccessToken))
 	req.Header.Add("Accept", "application/json")
 
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	// Execute request
-	resp, err := client.Do(req)
+	// Use our retry mechanism (3 retries)
+	resp, err := makeRequestWithRetries(req, 3)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute request: %w", err)
+		return nil, fmt.Errorf("failed to search TV shows: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -168,15 +234,10 @@ func getTVShowDetails(showID int) (*types.TMDBShowDetails, error) {
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.Config.TMDB.ReadAccessToken))
 	req.Header.Add("Accept", "application/json")
 
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	// Execute request
-	resp, err := client.Do(req)
+	// Use our retry mechanism (3 retries)
+	resp, err := makeRequestWithRetries(req, 3)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute request: %w", err)
+		return nil, fmt.Errorf("failed to get TV show details: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -209,15 +270,10 @@ func getSeasonDetails(showID, seasonNumber int) (*types.TMDBSeasonDetails, error
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.Config.TMDB.ReadAccessToken))
 	req.Header.Add("Accept", "application/json")
 
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	// Execute request
-	resp, err := client.Do(req)
+	// Use our retry mechanism (3 retries)
+	resp, err := makeRequestWithRetries(req, 3)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute request: %w", err)
+		return nil, fmt.Errorf("failed to get season details: %w", err)
 	}
 	defer resp.Body.Close()
 
