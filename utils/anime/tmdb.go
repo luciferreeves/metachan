@@ -337,7 +337,7 @@ func findBestSeason(shows []types.TMDBShowResult, title string, episodeCount int
 	return 0, 0, fmt.Errorf("could not find matching season for: %s", title)
 }
 
-// AttachEpisodeDescriptions enriches anime episodes with descriptions from TMDB
+// AttachEpisodeDescriptions enriches anime episodes with descriptions and thumbnails from TMDB
 func AttachEpisodeDescriptions(title string, episodes []types.AnimeSingleEpisode, alternativeTitle string, tmdbID int) []types.AnimeSingleEpisode {
 	if config.Config.TMDB.ReadAccessToken == "" {
 		logger.Log("TMDB is not configured, skipping episode description enrichment", types.LogOptions{
@@ -454,10 +454,14 @@ func AttachEpisodeDescriptions(title string, episodes []types.AnimeSingleEpisode
 		return episodes
 	}
 
-	// Enrich episodes with descriptions
+	// Enrich episodes with descriptions and thumbnails
 	tmdbEpisodes := seasonDetails.Episodes
 	enrichedEpisodes := make([]types.AnimeSingleEpisode, len(episodes))
 	copy(enrichedEpisodes, episodes)
+
+	// The base URL for TMDB images
+	const tmdbImageBaseURL = "https://image.tmdb.org/t/p/"
+	const thumbnailSize = "w300" // Use w300 size for episode thumbnails
 
 	for i := range enrichedEpisodes {
 		if i < len(tmdbEpisodes) {
@@ -467,16 +471,61 @@ func AttachEpisodeDescriptions(title string, episodes []types.AnimeSingleEpisode
 			} else {
 				enrichedEpisodes[i].Description = "No description available"
 			}
+
+			// Add thumbnail URL if available
+			if tmdbEpisodes[i].StillPath != "" {
+				enrichedEpisodes[i].ThumbnailURL = tmdbImageBaseURL + thumbnailSize + tmdbEpisodes[i].StillPath
+			}
 		} else {
 			enrichedEpisodes[i].Description = "No description available"
 		}
 	}
 
-	logger.Log(fmt.Sprintf("Successfully enriched %d episodes with descriptions for: %s",
-		len(enrichedEpisodes), title), types.LogOptions{
+	thumbnailCount := 0
+	for _, ep := range enrichedEpisodes {
+		if ep.ThumbnailURL != "" {
+			thumbnailCount++
+		}
+	}
+
+	logger.Log(fmt.Sprintf("Successfully enriched %d episodes with descriptions and %d with thumbnails for: %s",
+		len(enrichedEpisodes), thumbnailCount, title), types.LogOptions{
 		Level:  types.Success,
 		Prefix: "TMDB",
 	})
 
 	return enrichedEpisodes
+}
+
+func generateEpisodeData(episodes []types.JikanAnimeEpisode) ([]types.AnimeSingleEpisode, error) {
+	var AnimeEpisodes []types.AnimeSingleEpisode
+
+	for _, episode := range episodes {
+		AnimeEpisodes = append(AnimeEpisodes, types.AnimeSingleEpisode{
+			Titles: types.EpisodeTitles{
+				English:  episode.Title,
+				Japanese: episode.TitleJapanese,
+				Romaji:   episode.TitleRomaji,
+			},
+			Aired:        episode.Aired,
+			Score:        episode.Score,
+			Filler:       episode.Filler,
+			Recap:        episode.Recap,
+			ForumURL:     episode.ForumURL,
+			URL:          episode.URL,
+			Description:  "No description available",
+			ThumbnailURL: "",
+		})
+	}
+	return AnimeEpisodes, nil
+}
+
+func generateEpisodeDataWithDescriptions(episodes []types.JikanAnimeEpisode, title string, alternativeTitle string, tmdbID int) ([]types.AnimeSingleEpisode, error) {
+	basicEpisodes, err := generateEpisodeData(episodes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate basic episode data: %w", err)
+	}
+
+	enrichedEpisodes := AttachEpisodeDescriptions(title, basicEpisodes, alternativeTitle, tmdbID)
+	return enrichedEpisodes, nil
 }

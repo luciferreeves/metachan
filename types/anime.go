@@ -29,14 +29,15 @@ type EpisodeTitles struct {
 }
 
 type AnimeSingleEpisode struct {
-	Titles      EpisodeTitles `json:"titles"`
-	Description string        `json:"description"`
-	Aired       string        `json:"aired"`
-	Score       float64       `json:"score"`
-	Filler      bool          `json:"filler"`
-	Recap       bool          `json:"recap"`
-	ForumURL    string        `json:"forum_url"`
-	URL         string        `json:"url"`
+	Titles       EpisodeTitles `json:"titles"`
+	Description  string        `json:"description"`
+	Aired        string        `json:"aired"`
+	Score        float64       `json:"score"`
+	Filler       bool          `json:"filler"`
+	Recap        bool          `json:"recap"`
+	ForumURL     string        `json:"forum_url"`
+	URL          string        `json:"url"`
+	ThumbnailURL string        `json:"thumbnail_url"`
 }
 
 type AnimeEpisodes struct {
@@ -44,6 +45,24 @@ type AnimeEpisodes struct {
 	Aired    int                  `json:"aired"`
 	Episodes []AnimeSingleEpisode `json:"episodes"`
 }
+
+type AnimeLogos struct {
+	Small    string `json:"small,omitempty"`
+	Medium   string `json:"medium,omitempty"`
+	Large    string `json:"large,omitempty"`
+	XLarge   string `json:"xlarge,omitempty"`
+	Original string `json:"original,omitempty"`
+}
+
+// type AnimeSeason struct {
+// 	MALID    int           `json:"mal_id"`
+// 	Titles  AnimeTitles   `json:"titles"`
+// 	Synopsis string        `json:"synopsis"`
+// 	Type     AniSyncType   `json:"type"`
+// 	Source   string        `json:"source"`
+// 	Status   string        `json:"status"`
+// 	Duration string        `json:"duration"`
+// 	Mappings AnimeMappings `json:"mappings"`
 
 type Anime struct {
 	MALID    int           `json:"id"`
@@ -53,6 +72,7 @@ type Anime struct {
 	Source   string        `json:"source"`
 	Status   string        `json:"status"`
 	Duration string        `json:"duration"`
+	Logos    AnimeLogos    `json:"logos"`
 	Episodes AnimeEpisodes `json:"episodes"`
 	Mappings AnimeMappings `json:"mappings"`
 }
@@ -393,4 +413,34 @@ type AnilistAnimeResponse struct {
 			SiteURL string `json:"siteUrl"`
 		} `json:"media"`
 	} `json:"data"`
+}
+
+// MALSyncStreamingSite represents a single streaming site entry in the MALSync API
+type MALSyncStreamingSite struct {
+	ID         int    `json:"id,omitempty"`
+	Identifier any    `json:"identifier"`
+	Image      string `json:"image,omitempty"`
+	MalID      int    `json:"malId,omitempty"`
+	AniID      int    `json:"aniId,omitempty"`
+	Page       string `json:"page"`
+	Title      string `json:"title"`
+	Type       string `json:"type"`
+	URL        string `json:"url"`
+	External   bool   `json:"external,omitempty"`
+}
+
+// MALSyncSitesCollection represents the nested structure of streaming sites
+// Format: map[platformName]map[identifier]siteObject
+type MALSyncSitesCollection map[string]map[string]MALSyncStreamingSite
+
+// MALSyncAnimeResponse is the top-level response from the MALSync API
+type MALSyncAnimeResponse struct {
+	ID      int                    `json:"id"`
+	Type    string                 `json:"type"`
+	Title   string                 `json:"title"`
+	URL     string                 `json:"url"`
+	Total   int                    `json:"total"`
+	Image   string                 `json:"image"`
+	AnidbID int                    `json:"anidbId,omitempty"`
+	Sites   MALSyncSitesCollection `json:"Sites"`
 }
