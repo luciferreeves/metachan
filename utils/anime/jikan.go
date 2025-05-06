@@ -155,6 +155,121 @@ func waitForJikanRequest() {
 }
 
 func getAnimeViaJikan(malID int) (*types.JikanAnimeResponse, error) {
+	apiURL := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d", malID)
+	maxRetries := 3
+	baseBackoff := 1 * time.Second
+
+	var animeResponse types.JikanAnimeResponse
+	success := false
+	retries := 0
+
+	for !success && retries <= maxRetries {
+		// Use rate limiter before making the request
+		logger.Log(fmt.Sprintf("Waiting for rate limiter before requesting anime %d details", malID), types.LogOptions{
+			Level:  types.Debug,
+			Prefix: "AnimeAPI",
+		})
+		waitForJikanRequest()
+
+		req, err := http.NewRequest("GET", apiURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		client := &http.Client{
+			Timeout: 10 * time.Second, // Add timeout to prevent hanging requests
+		}
+		resp, err := client.Do(req)
+
+		if err != nil {
+			if retries < maxRetries {
+				retries++
+				backoffTime := time.Duration(float64(baseBackoff) * math.Pow(2, float64(retries-1)))
+				logger.Log(fmt.Sprintf("Request error for anime details, retrying in %v (retry %d/%d): %v",
+					backoffTime, retries, maxRetries, err), types.LogOptions{
+					Level:  types.Warn,
+					Prefix: "AnimeAPI",
+				})
+				time.Sleep(backoffTime)
+				continue
+			}
+			return nil, fmt.Errorf("failed to execute request after %d retries: %w", maxRetries, err)
+		}
+
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusTooManyRequests {
+			if retries < maxRetries {
+				retries++
+				backoffTime := time.Duration(float64(baseBackoff) * math.Pow(2, float64(retries-1)))
+				logger.Log(fmt.Sprintf("Rate limited on anime details, backing off for %v (retry %d/%d)",
+					backoffTime, retries, maxRetries), types.LogOptions{
+					Level:  types.Warn,
+					Prefix: "AnimeAPI",
+				})
+				time.Sleep(backoffTime)
+				continue
+			}
+			return nil, fmt.Errorf("failed to get anime data: rate limited after %d retries", maxRetries)
+		} else if resp.StatusCode != http.StatusOK {
+			if retries < maxRetries {
+				retries++
+				backoffTime := time.Duration(float64(baseBackoff) * math.Pow(2, float64(retries-1)))
+				logger.Log(fmt.Sprintf("HTTP error %d for anime details, retrying in %v (retry %d/%d)",
+					resp.StatusCode, backoffTime, retries, maxRetries), types.LogOptions{
+					Level:  types.Warn,
+					Prefix: "AnimeAPI",
+				})
+				time.Sleep(backoffTime)
+				continue
+			}
+			return nil, fmt.Errorf("failed to get anime data: %s", resp.Status)
+		}
+		// Limit response body size to prevent memory issues
+		bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024)) // 10MB limit
+		if err != nil {
+			if retries < maxRetries {
+				retries++
+				backoffTime := time.Duration(float64(baseBackoff) * math.Pow(2, float64(retries-1)))
+				logger.Log(fmt.Sprintf("Error reading response body, retrying in %v (retry %d/%d): %v",
+					backoffTime, retries, maxRetries, err), types.LogOptions{
+					Level:  types.Warn,
+					Prefix: "AnimeAPI",
+				})
+				time.Sleep(backoffTime)
+				continue
+			}
+			return nil, fmt.Errorf("failed to read response body: %w", err)
+		}
+		if err := json.Unmarshal(bodyBytes, &animeResponse); err != nil {
+			if retries < maxRetries {
+				retries++
+				backoffTime := time.Duration(float64(baseBackoff) * math.Pow(2, float64(retries-1)))
+				logger.Log(fmt.Sprintf("JSON decode error for anime details, retrying in %v (retry %d/%d): %v",
+					backoffTime, retries, maxRetries, err), types.LogOptions{
+					Level:  types.Warn,
+					Prefix: "AnimeAPI",
+				})
+				time.Sleep(backoffTime)
+				continue
+			}
+			return nil, fmt.Errorf("failed to decode response: %w", err)
+		}
+		success = true
+	}
+
+	if !success {
+		return nil, fmt.Errorf("failed to fetch anime details after maximum retries")
+	}
+
+	if animeResponse.Data.MALID == 0 {
+		return nil, fmt.Errorf("no data found for MAL ID %d", malID)
+	}
+
+	return &animeResponse, nil
+}
+
+func getFullAnimeViaJikan(malID int) (*types.JikanAnimeResponse, error) {
 	apiURL := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d/full", malID)
 	maxRetries := 3
 	baseBackoff := 1 * time.Second

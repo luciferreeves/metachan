@@ -54,27 +54,107 @@ type AnimeLogos struct {
 	Original string `json:"original,omitempty"`
 }
 
-// type AnimeSeason struct {
-// 	MALID    int           `json:"mal_id"`
-// 	Titles  AnimeTitles   `json:"titles"`
-// 	Synopsis string        `json:"synopsis"`
-// 	Type     AniSyncType   `json:"type"`
-// 	Source   string        `json:"source"`
-// 	Status   string        `json:"status"`
-// 	Duration string        `json:"duration"`
-// 	Mappings AnimeMappings `json:"mappings"`
+type AnimeImages struct {
+	Small    string `json:"small,omitempty"`
+	Large    string `json:"large,omitempty"`
+	Original string `json:"original,omitempty"`
+}
+
+type AnimeGenres struct {
+	Name    string `json:"name"`
+	GenreID int    `json:"genre_id"`
+	URL     string `json:"url"`
+}
+
+type AnimeProducer struct {
+	Name       string `json:"name"`
+	ProducerID int    `json:"producer_id"`
+	URL        string `json:"url"`
+}
+
+type AnimeLicensor struct {
+	Name       string `json:"name"`
+	ProducerID int    `json:"producer_id"`
+	URL        string `json:"url"`
+}
+
+type AnimeStudio struct {
+	Name     string `json:"name"`
+	StudioID int    `json:"studio_id"`
+	URL      string `json:"url"`
+}
+
+type AiringStatusDates struct {
+	Day    int    `json:"day"`
+	Month  int    `json:"month"`
+	Year   int    `json:"year"`
+	String string `json:"string"`
+}
+
+type AiringStatus struct {
+	From   AiringStatusDates `json:"from"`
+	To     AiringStatusDates `json:"to"`
+	String string            `json:"string"`
+}
+
+type AnimeScores struct {
+	Score      float64 `json:"score"`
+	ScoredBy   int     `json:"scored_by"`
+	Rank       int     `json:"rank"`
+	Popularity int     `json:"popularity"`
+	Members    int     `json:"members"`
+	Favorites  int     `json:"favorites"`
+}
+
+type AnimeBroadcast struct {
+	Day      string `json:"day"`
+	Time     string `json:"time"`
+	Timezone string `json:"timezone"`
+	String   string `json:"string"`
+}
+
+type AnimeSeason struct {
+	MALID        int          `json:"id"`
+	Titles       AnimeTitles  `json:"titles"`
+	Synopsis     string       `json:"synopsis"`
+	Type         AniSyncType  `json:"type"`
+	Source       string       `json:"source"`
+	Airing       bool         `json:"airing"`
+	Status       string       `json:"status"`
+	AiringStatus AiringStatus `json:"airing_status"`
+	Duration     string       `json:"duration"`
+	Images       AnimeImages  `json:"images"`
+	Scores       AnimeScores  `json:"scores"`
+	Season       string       `json:"season"`
+	Year         int          `json:"year"`
+	Current      bool         `json:"current"`
+}
 
 type Anime struct {
-	MALID    int           `json:"id"`
-	Titles   AnimeTitles   `json:"titles"`
-	Synopsis string        `json:"synopsis"`
-	Type     AniSyncType   `json:"type"`
-	Source   string        `json:"source"`
-	Status   string        `json:"status"`
-	Duration string        `json:"duration"`
-	Logos    AnimeLogos    `json:"logos"`
-	Episodes AnimeEpisodes `json:"episodes"`
-	Mappings AnimeMappings `json:"mappings"`
+	MALID        int             `json:"id"`
+	Titles       AnimeTitles     `json:"titles"`
+	Synopsis     string          `json:"synopsis"`
+	Type         AniSyncType     `json:"type"`
+	Source       string          `json:"source"`
+	Airing       bool            `json:"airing"`
+	Status       string          `json:"status"`
+	AiringStatus AiringStatus    `json:"airing_status"`
+	Duration     string          `json:"duration"`
+	Images       AnimeImages     `json:"images"`
+	Logos        AnimeLogos      `json:"logos"`
+	Covers       AnimeImages     `json:"covers"`
+	Color        string          `json:"color"`
+	Genres       []AnimeGenres   `json:"genres"`
+	Scores       AnimeScores     `json:"scores"`
+	Season       string          `json:"season"`
+	Year         int             `json:"year"`
+	Broadcast    AnimeBroadcast  `json:"broadcast"`
+	Producers    []AnimeProducer `json:"producers"`
+	Studios      []AnimeStudio   `json:"studios"`
+	Licensors    []AnimeLicensor `json:"licensors"`
+	Seasons      []AnimeSeason   `json:"seasons"`
+	Episodes     AnimeEpisodes   `json:"episodes"`
+	Mappings     AnimeMappings   `json:"mappings"`
 }
 
 type JikanPagination struct {

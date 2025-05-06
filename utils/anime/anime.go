@@ -10,7 +10,7 @@ import (
 func GetAnimeDetails(animeMapping *entities.AnimeMapping) (*types.Anime, error) {
 	malID := animeMapping.MAL
 
-	anime, err := getAnimeViaJikan(malID)
+	anime, err := getFullAnimeViaJikan(malID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get anime details: %w", err)
 	}
@@ -46,6 +46,28 @@ func GetAnimeDetails(animeMapping *entities.AnimeMapping) (*types.Anime, error) 
 		logos = types.AnimeLogos{}
 	}
 
+	// Get seasons information if TVDB ID is available
+	var seasons []types.AnimeSeason
+	if animeMapping.TVDB != 0 {
+		// Get all mappings for this TVDB ID (representing different seasons)
+		seasonMappings, err := FindSeasonMappings(animeMapping.TVDB)
+		if err != nil {
+			logger.Log(fmt.Sprintf("Failed to find season mappings: %v", err), types.LogOptions{
+				Level:  types.Warn,
+				Prefix: "AnimeAPI",
+			})
+		} else if len(seasonMappings) > 0 {
+			// Process the season mappings to get season details
+			seasons, err = GetAnimeSeason(&seasonMappings, malID)
+			if err != nil {
+				logger.Log(fmt.Sprintf("Failed to get anime seasons: %v", err), types.LogOptions{
+					Level:  types.Warn,
+					Prefix: "AnimeAPI",
+				})
+			}
+		}
+	}
+
 	animeDetails := &types.Anime{
 		MALID: malID,
 		Titles: types.AnimeTitles{
@@ -57,9 +79,57 @@ func GetAnimeDetails(animeMapping *entities.AnimeMapping) (*types.Anime, error) 
 		Synopsis: anime.Data.Synopsis,
 		Type:     types.AniSyncType(animeMapping.Type),
 		Source:   anime.Data.Source,
+		Airing:   anime.Data.Airing,
 		Status:   anime.Data.Status,
+		AiringStatus: types.AiringStatus{
+			From: types.AiringStatusDates{
+				Day:    anime.Data.Aired.Prop.From.Day,
+				Month:  anime.Data.Aired.Prop.From.Month,
+				Year:   anime.Data.Aired.Prop.From.Year,
+				String: anime.Data.Aired.From,
+			},
+			To: types.AiringStatusDates{
+				Day:    anime.Data.Aired.Prop.To.Day,
+				Month:  anime.Data.Aired.Prop.To.Month,
+				Year:   anime.Data.Aired.Prop.To.Year,
+				String: anime.Data.Aired.To,
+			},
+			String: anime.Data.Aired.String,
+		},
 		Duration: anime.Data.Duration,
-		Logos:    logos,
+		Images: types.AnimeImages{
+			Small:    anime.Data.Images.JPG.SmallImageURL,
+			Large:    anime.Data.Images.JPG.LargeImageURL,
+			Original: anime.Data.Images.JPG.ImageURL,
+		},
+		Logos: logos,
+		Covers: types.AnimeImages{
+			Small:    anilistAnime.Data.Media.CoverImage.Medium,
+			Large:    anilistAnime.Data.Media.CoverImage.Large,
+			Original: anilistAnime.Data.Media.CoverImage.ExtraLarge,
+		},
+		Color:  anilistAnime.Data.Media.CoverImage.Color,
+		Genres: generateGenres(anime.Data.Genres, anime.Data.ExplicitGenres),
+		Scores: types.AnimeScores{
+			Score:      anime.Data.Score,
+			ScoredBy:   anime.Data.ScoredBy,
+			Rank:       anime.Data.Rank,
+			Popularity: anime.Data.Popularity,
+			Members:    anime.Data.Members,
+			Favorites:  anime.Data.Favorites,
+		},
+		Season: anime.Data.Season,
+		Year:   anime.Data.Year,
+		Broadcast: types.AnimeBroadcast{
+			Day:      anime.Data.Broadcast.Day,
+			Time:     anime.Data.Broadcast.Time,
+			Timezone: anime.Data.Broadcast.Timezone,
+			String:   anime.Data.Broadcast.String,
+		},
+		Producers: generateProducers(anime.Data.Producers),
+		Studios:   generateStudios(anime.Data.Studios),
+		Licensors: generateLicensors(anime.Data.Licensors),
+		Seasons:   seasons, // Add seasons information
 		Episodes: types.AnimeEpisodes{
 			Total:    getEpisodeCount(anime, anilistAnime),
 			Aired:    len(episodes.Data),
@@ -89,4 +159,65 @@ func getEpisodeCount(malAnime *types.JikanAnimeResponse, anilistAnime *types.Ani
 	episodes = max(episodes, streamingScheduleLength)
 
 	return episodes
+}
+
+func generateGenres(genres, explicitGenres []types.JikanGenericMALStructure) []types.AnimeGenres {
+	animeGenres := make([]types.AnimeGenres, len(genres)+len(explicitGenres))
+	counter := 0
+
+	for _, genre := range genres {
+		animeGenres[counter] = types.AnimeGenres{
+			Name:    genre.Name,
+			GenreID: genre.MALID,
+			URL:     genre.URL,
+		}
+		counter++
+	}
+
+	for _, genre := range explicitGenres {
+		animeGenres[counter] = types.AnimeGenres{
+			Name:    genre.Name,
+			GenreID: genre.MALID,
+			URL:     genre.URL,
+		}
+		counter++
+	}
+
+	return animeGenres
+}
+
+func generateStudios(genericPLS []types.JikanGenericMALStructure) []types.AnimeStudio {
+	studios := make([]types.AnimeStudio, len(genericPLS))
+	for i, studio := range genericPLS {
+		studios[i] = types.AnimeStudio{
+			Name:     studio.Name,
+			StudioID: studio.MALID,
+			URL:      studio.URL,
+		}
+	}
+	return studios
+}
+
+func generateProducers(genericPLS []types.JikanGenericMALStructure) []types.AnimeProducer {
+	producers := make([]types.AnimeProducer, len(genericPLS))
+	for i, producer := range genericPLS {
+		producers[i] = types.AnimeProducer{
+			Name:       producer.Name,
+			ProducerID: producer.MALID,
+			URL:        producer.URL,
+		}
+	}
+	return producers
+}
+
+func generateLicensors(genericPLS []types.JikanGenericMALStructure) []types.AnimeLicensor {
+	licensors := make([]types.AnimeLicensor, len(genericPLS))
+	for i, licensor := range genericPLS {
+		licensors[i] = types.AnimeLicensor{
+			Name:       licensor.Name,
+			ProducerID: licensor.MALID,
+			URL:        licensor.URL,
+		}
+	}
+	return licensors
 }
