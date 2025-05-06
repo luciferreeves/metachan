@@ -75,6 +75,9 @@ func GetAnimeDetails(animeMapping *entities.AnimeMapping) (*types.Anime, error) 
 
 	characters := getAnimeCharacters(characterResponse)
 
+	nextAiringEpisode := getNextAiringEpisode(anilistAnime)
+	schedule := getAnimeSchedule(anilistAnime)
+
 	animeDetails := &types.Anime{
 		MALID: malID,
 		Titles: types.AnimeTitles{
@@ -142,7 +145,9 @@ func GetAnimeDetails(animeMapping *entities.AnimeMapping) (*types.Anime, error) 
 			Aired:    len(episodes.Data),
 			Episodes: episodeData,
 		},
-		Characters: characters,
+		NextAiringEpisode: nextAiringEpisode,
+		AiringSchedule:    schedule,
+		Characters:        characters,
 		Mappings: types.AnimeMappings{
 			AniDB:          animeMapping.AniDB,
 			Anilist:        animeMapping.Anilist,
@@ -253,4 +258,33 @@ func generateLicensors(genericPLS []types.JikanGenericMALStructure) []types.Anim
 		}
 	}
 	return licensors
+}
+
+func getNextAiringEpisode(anilistAnime *types.AnilistAnimeResponse) types.AnimeAiringEpisode {
+	if anilistAnime.Data.Media.NextAiringEpisode.ID == 0 {
+		return types.AnimeAiringEpisode{}
+	}
+
+	return types.AnimeAiringEpisode{
+		TimeUntilAiring: anilistAnime.Data.Media.NextAiringEpisode.TimeUntilAiring,
+		Episode:         anilistAnime.Data.Media.NextAiringEpisode.Episode,
+		AiringAt:        anilistAnime.Data.Media.NextAiringEpisode.AiringAt,
+	}
+}
+
+func getAnimeSchedule(anilistAnime *types.AnilistAnimeResponse) []types.AnimeAiringEpisode {
+	if anilistAnime.Data.Media.AiringSchedule.Nodes == nil {
+		return nil
+	}
+
+	schedule := make([]types.AnimeAiringEpisode, len(anilistAnime.Data.Media.AiringSchedule.Nodes))
+	for i, episode := range anilistAnime.Data.Media.AiringSchedule.Nodes {
+		schedule[i] = types.AnimeAiringEpisode{
+			TimeUntilAiring: episode.TimeUntilAiring,
+			Episode:         episode.Episode,
+			AiringAt:        episode.AiringAt,
+		}
+	}
+
+	return schedule
 }
