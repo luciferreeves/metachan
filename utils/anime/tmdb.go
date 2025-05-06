@@ -9,6 +9,7 @@ import (
 	"metachan/types"
 	"metachan/utils/logger"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -515,6 +516,9 @@ func generateEpisodeData(episodes []types.JikanAnimeEpisode) ([]types.AnimeSingl
 			URL:          episode.URL,
 			Description:  "No description available",
 			ThumbnailURL: "",
+			Stream: types.AnimeStreaming{
+				SkipTimes: []types.AnimeSkipTimes{},
+			},
 		})
 	}
 	return AnimeEpisodes, nil
@@ -527,5 +531,161 @@ func generateEpisodeDataWithDescriptions(episodes []types.JikanAnimeEpisode, tit
 	}
 
 	enrichedEpisodes := AttachEpisodeDescriptions(title, basicEpisodes, alternativeTitle, tmdbID)
+
+	// Get the MAL ID from the first episode URL if available
+	var malID int
+	if len(episodes) > 0 && episodes[0].URL != "" {
+		// Extract MAL ID from URL like "https://myanimelist.net/anime/1735/Naruto__Shippuuden/episode/1"
+		parts := strings.Split(episodes[0].URL, "/")
+		for i, part := range parts {
+			if part == "anime" && i+1 < len(parts) {
+				// Try to parse the next part as an integer
+				id, err := strconv.Atoi(parts[i+1])
+				if err == nil {
+					malID = id
+					break
+				}
+			}
+		}
+	}
+
+	if malID > 0 {
+		logger.Log(fmt.Sprintf("Fetching skip times for anime with MAL ID %d", malID), types.LogOptions{
+			Level:  types.Info,
+			Prefix: "AniSkip",
+		})
+
+		// Process each episode to add skip times
+		for i := range enrichedEpisodes {
+			// Episode numbers in the API are 1-indexed
+			episodeNumber := i + 1
+			skipTimes, err := getAnimeEpisodeSkipTimes(malID, episodeNumber)
+
+			if err != nil {
+				logger.Log(fmt.Sprintf("Failed to get skip times for episode %d: %v", episodeNumber, err), types.LogOptions{
+					Level:  types.Debug,
+					Prefix: "AniSkip",
+				})
+				continue
+			}
+
+			if len(skipTimes) > 0 {
+				enrichedEpisodes[i].Stream.SkipTimes = skipTimes
+				logger.Log(fmt.Sprintf("Added %d skip times for episode %d", len(skipTimes), episodeNumber), types.LogOptions{
+					Level:  types.Debug,
+					Prefix: "AniSkip",
+				})
+			}
+		}
+
+		// Count how many episodes have skip times
+		skipTimeCount := 0
+		for _, ep := range enrichedEpisodes {
+			if len(ep.Stream.SkipTimes) > 0 {
+				skipTimeCount++
+			}
+		}
+
+		if skipTimeCount > 0 {
+			logger.Log(fmt.Sprintf("Successfully added skip times to %d/%d episodes for: %s",
+				skipTimeCount, len(enrichedEpisodes), title), types.LogOptions{
+				Level:  types.Success,
+				Prefix: "AniSkip",
+			})
+		} else {
+			logger.Log(fmt.Sprintf("No skip times found for any episodes of: %s", title), types.LogOptions{
+				Level:  types.Warn,
+				Prefix: "AniSkip",
+			})
+		}
+	} else {
+		logger.Log(fmt.Sprintf("Could not determine MAL ID for skip times for: %s", title), types.LogOptions{
+			Level:  types.Warn,
+			Prefix: "AniSkip",
+		})
+	}
+
+	// Add streaming sources to episodes
+	logger.Log(fmt.Sprintf("Fetching streaming sources for anime: %s", title), types.LogOptions{
+		Level:  types.Info,
+		Prefix: "Streaming",
+	})
+
+	// Prioritize original titles for searching - first romaji, then Japanese, then English
+	// This better matches how anime streaming sites catalog their content
+	searchTitle := title // Default to romaji title
+
+	// Process all episodes to add streaming sources
+	for i := range enrichedEpisodes {
+		episodeNumber := i + 1
+
+		streaming, err := GetStreamingSources(searchTitle, episodeNumber)
+		if err != nil {
+			// If search fails with romaji title, try with Japanese title if available
+			if enrichedEpisodes[i].Titles.Japanese != "" {
+				logger.Log(fmt.Sprintf("Retrying search with Japanese title for episode %d", episodeNumber), types.LogOptions{
+					Level:  types.Debug,
+					Prefix: "Streaming",
+				})
+				streaming, err = GetStreamingSources(enrichedEpisodes[i].Titles.Japanese, episodeNumber)
+			}
+
+			// If both fail and English title is available, try with that
+			if err != nil && alternativeTitle != "" {
+				logger.Log(fmt.Sprintf("Retrying search with English title for episode %d", episodeNumber), types.LogOptions{
+					Level:  types.Debug,
+					Prefix: "Streaming",
+				})
+
+				englishTitle := strings.TrimPrefix(alternativeTitle, "English: ")
+
+				streaming, err = GetStreamingSources(englishTitle, episodeNumber)
+			}
+
+			if err != nil {
+				logger.Log(fmt.Sprintf("Failed to get streaming sources for episode %d: %v", episodeNumber, err), types.LogOptions{
+					Level:  types.Debug,
+					Prefix: "Streaming",
+				})
+				continue
+			}
+		}
+
+		// Keep the skip times which were already added
+		streaming.SkipTimes = enrichedEpisodes[i].Stream.SkipTimes
+
+		// Update the streaming sources
+		enrichedEpisodes[i].Stream = *streaming
+
+		// Add a small delay to avoid rate limiting
+		time.Sleep(200 * time.Millisecond)
+	}
+
+	// Count how many episodes have streaming sources
+	streamingSubCount := 0
+	streamingDubCount := 0
+
+	for _, ep := range enrichedEpisodes {
+		if len(ep.Stream.Sub) > 0 {
+			streamingSubCount++
+		}
+		if len(ep.Stream.Dub) > 0 {
+			streamingDubCount++
+		}
+	}
+
+	if streamingSubCount > 0 || streamingDubCount > 0 {
+		logger.Log(fmt.Sprintf("Successfully added streaming sources to episodes for: %s (SUB: %d/%d, DUB: %d/%d)",
+			title, streamingSubCount, len(enrichedEpisodes), streamingDubCount, len(enrichedEpisodes)), types.LogOptions{
+			Level:  types.Success,
+			Prefix: "Streaming",
+		})
+	} else {
+		logger.Log(fmt.Sprintf("No streaming sources found for any episodes of: %s", title), types.LogOptions{
+			Level:  types.Warn,
+			Prefix: "Streaming",
+		})
+	}
+
 	return enrichedEpisodes, nil
 }

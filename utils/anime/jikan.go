@@ -627,3 +627,96 @@ func getAnimeEpisodesViaJikan(malId int) (*types.JikanAnimeEpisodeResponse, erro
 		Data: allEpisodes,
 	}, nil
 }
+
+func getAnimeCharactersViaJikan(malID int) (*types.JikanAnimeCharacterResponse, error) {
+	apiURL := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d/characters", malID)
+	maxRetries := 3
+	baseBackoff := 1 * time.Second
+
+	var characterResponse types.JikanAnimeCharacterResponse
+	success := false
+	retries := 0
+
+	for !success && retries <= maxRetries {
+		logger.Log(fmt.Sprintf("Waiting for rate limiter before requesting anime %d characters", malID), types.LogOptions{
+			Level:  types.Debug,
+			Prefix: "AnimeAPI",
+		})
+		waitForJikanRequest()
+
+		req, err := http.NewRequest("GET", apiURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		client := &http.Client{
+			Timeout: 10 * time.Second, // Add timeout to prevent hanging requests
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			if retries < maxRetries {
+				retries++
+				backoffTime := time.Duration(float64(baseBackoff) * math.Pow(2, float64(retries-1)))
+				logger.Log(fmt.Sprintf("Request error for anime characters, retrying in %v (retry %d/%d): %v",
+					backoffTime, retries, maxRetries, err), types.LogOptions{
+					Level:  types.Warn,
+					Prefix: "AnimeAPI",
+				})
+				time.Sleep(backoffTime)
+				continue
+			}
+			return nil, fmt.Errorf("failed to execute request after %d retries: %w", maxRetries, err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusTooManyRequests {
+			if retries < maxRetries {
+				retries++
+				backoffTime := time.Duration(float64(baseBackoff) * math.Pow(2, float64(retries-1)))
+				logger.Log(fmt.Sprintf("Rate limited on anime characters, backing off for %v (retry %d/%d)",
+					backoffTime, retries, maxRetries), types.LogOptions{
+					Level:  types.Warn,
+					Prefix: "AnimeAPI",
+				})
+				time.Sleep(backoffTime)
+				continue
+			}
+			return nil, fmt.Errorf("failed to get anime characters: rate limited after %d retries", maxRetries)
+		} else if resp.StatusCode != http.StatusOK {
+			if retries < maxRetries {
+				retries++
+				backoffTime := time.Duration(float64(baseBackoff) * math.Pow(2, float64(retries-1)))
+				logger.Log(fmt.Sprintf("HTTP error %d for anime characters, retrying in %v (retry %d/%d)",
+					resp.StatusCode, backoffTime, retries, maxRetries), types.LogOptions{
+					Level:  types.Warn,
+					Prefix: "AnimeAPI",
+				})
+				time.Sleep(backoffTime)
+				continue
+			}
+			return nil, fmt.Errorf("failed to get anime characters: %s", resp.Status)
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&characterResponse); err != nil {
+			if retries < maxRetries {
+				retries++
+				backoffTime := time.Duration(float64(baseBackoff) * math.Pow(2, float64(retries-1)))
+				logger.Log(fmt.Sprintf("JSON decode error for anime characters, retrying in %v (retry %d/%d): %v",
+					backoffTime, retries, maxRetries, err), types.LogOptions{
+					Level:  types.Warn,
+					Prefix: "AnimeAPI",
+				})
+				time.Sleep(backoffTime)
+				continue
+			}
+			return nil, fmt.Errorf("failed to decode response: %w", err)
+		}
+		success = true
+	}
+
+	if !success {
+		return nil, fmt.Errorf("failed to fetch anime characters after maximum retries")
+	}
+
+	return &characterResponse, nil
+}

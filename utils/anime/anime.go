@@ -27,7 +27,7 @@ func GetAnimeDetails(animeMapping *entities.AnimeMapping) (*types.Anime, error) 
 		return nil, fmt.Errorf("failed to get anime episodes: %w", err)
 	}
 
-	episodeData, err := generateEpisodeDataWithDescriptions(
+	episodeData, _ := generateEpisodeDataWithDescriptions(
 		episodes.Data,
 		anime.Data.Title,
 		anime.Data.TitleEnglish,
@@ -67,6 +67,13 @@ func GetAnimeDetails(animeMapping *entities.AnimeMapping) (*types.Anime, error) 
 			}
 		}
 	}
+
+	characterResponse, err := getAnimeCharactersViaJikan(malID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get anime characters: %w", err)
+	}
+
+	characters := getAnimeCharacters(characterResponse)
 
 	animeDetails := &types.Anime{
 		MALID: malID,
@@ -135,6 +142,7 @@ func GetAnimeDetails(animeMapping *entities.AnimeMapping) (*types.Anime, error) 
 			Aired:    len(episodes.Data),
 			Episodes: episodeData,
 		},
+		Characters: characters,
 		Mappings: types.AnimeMappings{
 			AniDB:          animeMapping.AniDB,
 			Anilist:        animeMapping.Anilist,
@@ -159,6 +167,31 @@ func getEpisodeCount(malAnime *types.JikanAnimeResponse, anilistAnime *types.Ani
 	episodes = max(episodes, streamingScheduleLength)
 
 	return episodes
+}
+
+func getAnimeCharacters(characterResponse *types.JikanAnimeCharacterResponse) []types.AnimeCharacter {
+	characters := make([]types.AnimeCharacter, len(characterResponse.Data))
+	for i, character := range characterResponse.Data {
+		characters[i] = types.AnimeCharacter{
+			MALID:       character.Character.MALID,
+			URL:         character.Character.URL,
+			ImageURL:    character.Character.Images.JPG.ImageURL,
+			Name:        character.Character.Name,
+			Role:        character.Role,
+			VoiceActors: make([]types.AnimeVoiceActor, len(character.VoiceActors)),
+		}
+
+		for j, voiceActor := range character.VoiceActors {
+			characters[i].VoiceActors[j] = types.AnimeVoiceActor{
+				MALID:    voiceActor.Person.MALID,
+				URL:      voiceActor.Person.URL,
+				Image:    voiceActor.Person.Images.JPG.ImageURL,
+				Name:     voiceActor.Person.Name,
+				Language: voiceActor.Language,
+			}
+		}
+	}
+	return characters
 }
 
 func generateGenres(genres, explicitGenres []types.JikanGenericMALStructure) []types.AnimeGenres {
