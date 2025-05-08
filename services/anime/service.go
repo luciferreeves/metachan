@@ -8,8 +8,6 @@ import (
 	"metachan/utils/concurrency"
 	"metachan/utils/logger"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -186,6 +184,14 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 		// If English title fails, try with Japanese title
 		if err != nil && anime.Data.TitleJapanese != "" {
 			subCount, dubCount, err = s.streamingClient.GetStreamingCounts(anime.Data.TitleJapanese)
+
+			// Log the final error if all attempts failed
+			if err != nil {
+				logger.Log(fmt.Sprintf("Failed to fetch streaming counts after all attempts: %v", err), types.LogOptions{
+					Level:  types.Warn,
+					Prefix: "AnimeAPI",
+				})
+			}
 		}
 
 		logger.Log(fmt.Sprintf("Streaming count check took %s. Subbed: %d, Dubbed: %d",
@@ -375,164 +381,6 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 	}
 
 	return animeDetails, nil
-}
-
-// enrichEpisodes adds streaming sources to episodes in parallel
-func (s *Service) enrichEpisodes(
-	episodes []types.AnimeSingleEpisode,
-	title string,
-	alternativeTitle string,
-	tmdbID int,
-	malID int,
-) []types.AnimeSingleEpisode {
-	enrichStart := time.Now()
-	defer func() {
-		logger.Log(fmt.Sprintf("Full enrichEpisodes function time: %s", time.Since(enrichStart)), types.LogOptions{
-			Level:  types.Debug,
-			Prefix: "AnimeAPI",
-		})
-	}()
-
-	// We can still enrich with TMDB data if needed
-	tmdbStart := time.Now()
-	enrichedEpisodes := AttachEpisodeDescriptions(title, episodes, alternativeTitle, tmdbID)
-	logger.Log(fmt.Sprintf("TMDB episode descriptions fetch time: %s", time.Since(tmdbStart)), types.LogOptions{
-		Level:  types.Debug,
-		Prefix: "AnimeAPI",
-	})
-
-	// Early return if no episodes
-	if len(enrichedEpisodes) == 0 {
-		return enrichedEpisodes
-	}
-
-	// Process streaming sources in parallel - use a reasonable number of workers
-	const maxConcurrentStreaming = 8
-	streamingChan := make(chan types.EpisodeStreamingResult, len(enrichedEpisodes))
-	streamingStart := time.Now()
-
-	// Create a worker pool
-	var wg sync.WaitGroup
-	workerCh := make(chan int, maxConcurrentStreaming)
-
-	// Track stats for streaming fetches
-	var streamingSuccessCount int32
-	var streamingFailCount int32
-	var streamingRetryCount int32
-
-	// Count of subbed and dubbed episodes
-	var subbedCount int32
-	var dubbedCount int32
-
-	for i := 0; i < len(enrichedEpisodes); i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-
-			// Get a worker slot or block
-			workerCh <- 1
-			defer func() { <-workerCh }()
-
-			episodeStart := time.Now()
-
-			// Try to get streaming sources
-			episodeNumber := idx + 1
-			searchTitle := title
-
-			streaming, err := s.streamingClient.GetStreamingSources(searchTitle, episodeNumber)
-			retryCount := 0
-
-			// If search fails with romaji title, try with Japanese title if available
-			if err != nil && enrichedEpisodes[idx].Titles.Japanese != "" {
-				retryCount++
-				atomic.AddInt32(&streamingRetryCount, 1)
-				streaming, err = s.streamingClient.GetStreamingSources(enrichedEpisodes[idx].Titles.Japanese, episodeNumber)
-
-				// If still fails and English title is available, try with that
-				if err != nil && alternativeTitle != "" {
-					retryCount++
-					atomic.AddInt32(&streamingRetryCount, 1)
-					englishTitle := strings.TrimPrefix(alternativeTitle, "English: ")
-					streaming, err = s.streamingClient.GetStreamingSources(englishTitle, episodeNumber)
-				}
-			}
-
-			// Send the result back whether successful or not
-			if err != nil {
-				atomic.AddInt32(&streamingFailCount, 1)
-				streamingChan <- types.EpisodeStreamingResult{
-					EpisodeNumber: episodeNumber,
-					Streaming: &types.AnimeStreaming{
-						Sub: []types.AnimeStreamingSource{},
-						Dub: []types.AnimeStreamingSource{},
-					},
-				}
-			} else {
-				atomic.AddInt32(&streamingSuccessCount, 1)
-				// Update subbed and dubbed counts based on what we found
-				if len(streaming.Sub) > 0 {
-					atomic.AddInt32(&subbedCount, 1)
-				}
-				if len(streaming.Dub) > 0 {
-					atomic.AddInt32(&dubbedCount, 1)
-				}
-				streamingChan <- types.EpisodeStreamingResult{
-					EpisodeNumber: episodeNumber,
-					Streaming:     streaming,
-				}
-			}
-
-			if episodeNumber%5 == 0 || episodeNumber == len(enrichedEpisodes) {
-				logger.Log(fmt.Sprintf("Episode %d/%d streaming fetch time: %s (retries: %d)",
-					episodeNumber, len(enrichedEpisodes), time.Since(episodeStart), retryCount), types.LogOptions{
-					Level:  types.Debug,
-					Prefix: "AnimeAPI",
-				})
-			}
-		}(i)
-	}
-
-	// Wait for all workers to finish in a separate goroutine
-	go func() {
-		wg.Wait()
-		close(streamingChan)
-		logger.Log(fmt.Sprintf("All streaming workers finished. Success: %d, Failed: %d, Retries: %d, Subbed: %d, Dubbed: %d",
-			atomic.LoadInt32(&streamingSuccessCount),
-			atomic.LoadInt32(&streamingFailCount),
-			atomic.LoadInt32(&streamingRetryCount),
-			atomic.LoadInt32(&subbedCount),
-			atomic.LoadInt32(&dubbedCount)), types.LogOptions{
-			Level:  types.Debug,
-			Prefix: "AnimeAPI",
-		})
-	}()
-
-	// Collect results
-	resultCount := 0
-	for range streamingChan {
-		resultCount++
-		// Simply count the received results
-
-		// Log progress periodically
-		if resultCount%10 == 0 || resultCount == len(enrichedEpisodes) {
-			logger.Log(fmt.Sprintf("Processed %d/%d streaming results (%s elapsed)",
-				resultCount, len(enrichedEpisodes), time.Since(streamingStart)), types.LogOptions{
-				Level:  types.Debug,
-				Prefix: "AnimeAPI",
-			})
-		}
-	}
-
-	logger.Log(fmt.Sprintf("Total streaming fetch time for %d episodes: %s, Subbed: %d, Dubbed: %d",
-		len(enrichedEpisodes), time.Since(streamingStart),
-		atomic.LoadInt32(&subbedCount),
-		atomic.LoadInt32(&dubbedCount)), types.LogOptions{
-		Level:  types.Debug,
-		Prefix: "AnimeAPI",
-	})
-
-	// Return the enriched episodes and the counts
-	return enrichedEpisodes
 }
 
 // getSeasonDetails fetches details for anime seasons
