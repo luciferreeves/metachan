@@ -3,7 +3,9 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"metachan/types"
+	"metachan/utils/mappers"
 	"net/http"
 	"net/url"
 	"sort"
@@ -136,9 +138,7 @@ func (c *AllAnimeClient) getClockLink(urlStr string) (string, error) {
 		return "", err
 	}
 
-	for key, values := range c.headers {
-		req.Header[key] = values
-	}
+	maps.Copy(req.Header, c.headers)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -146,13 +146,13 @@ func (c *AllAnimeClient) getClockLink(urlStr string) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return "", err
 	}
 
-	if links, ok := data["links"].([]interface{}); ok && len(links) > 0 {
-		if link, ok := links[0].(map[string]interface{}); ok {
+	if links, ok := data["links"].([]any); ok && len(links) > 0 {
+		if link, ok := links[0].(map[string]any); ok {
 			if linkStr, ok := link["link"].(string); ok {
 				return linkStr, nil
 			}
@@ -220,6 +220,9 @@ func getServerName(sourceType string) string {
 
 // SearchAnime searches for anime by title on AllAnime
 func (c *AllAnimeClient) SearchAnime(query string) ([]StreamingSearchResult, error) {
+	// Check for special anime ID mapping
+	specialID, hasSpecialMapping := mappers.GetSpecialAnimeID(query)
+
 	searchQuery := `
 	query(
 		$search: SearchInput
@@ -243,8 +246,8 @@ func (c *AllAnimeClient) SearchAnime(query string) ([]StreamingSearchResult, err
 	}
 	`
 
-	variables := map[string]interface{}{
-		"search": map[string]interface{}{
+	variables := map[string]any{
+		"search": map[string]any{
 			"allowAdult":   false,
 			"allowUnknown": false,
 			"query":        query,
@@ -264,9 +267,7 @@ func (c *AllAnimeClient) SearchAnime(query string) ([]StreamingSearchResult, err
 		return nil, err
 	}
 
-	for key, values := range c.headers {
-		req.Header[key] = values
-	}
+	maps.Copy(req.Header, c.headers)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -274,28 +275,34 @@ func (c *AllAnimeClient) SearchAnime(query string) ([]StreamingSearchResult, err
 	}
 	defer resp.Body.Close()
 
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, err
 	}
 
-	shows := data["data"].(map[string]interface{})["shows"].(map[string]interface{})["edges"].([]interface{})
+	shows := data["data"].(map[string]any)["shows"].(map[string]any)["edges"].([]any)
 	results := make([]StreamingSearchResult, 0, len(shows))
 
 	for _, show := range shows {
-		showMap := show.(map[string]interface{})
-		episodes := showMap["availableEpisodes"].(map[string]interface{})
+		showMap := show.(map[string]any)
+		episodes := showMap["availableEpisodes"].(map[string]any)
 		result := StreamingSearchResult{
 			ID:          showMap["_id"].(string),
 			Name:        showMap["name"].(string),
 			SubEpisodes: int(episodes["sub"].(float64)),
 			DubEpisodes: int(episodes["dub"].(float64)),
+			Similarity:  c.calculateSimilarity(query, showMap["name"].(string)),
 		}
-		result.Similarity = c.calculateSimilarity(query, result.Name)
+
+		// If this is the special anime we're looking for, boost its similarity
+		if hasSpecialMapping && result.ID == specialID {
+			result.Similarity = 2.0 // Forcing special ID to be the best match
+		}
+
 		results = append(results, result)
 	}
 
-	// Sort by similarity
+	// Sort only once by similarity
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Similarity > results[j].Similarity
 	})
@@ -316,7 +323,7 @@ func (c *AllAnimeClient) GetEpisodesList(showID string, mode string) ([]string, 
 	}
 	`
 
-	variables := map[string]interface{}{
+	variables := map[string]any{
 		"showId": showID,
 	}
 
@@ -340,14 +347,14 @@ func (c *AllAnimeClient) GetEpisodesList(showID string, mode string) ([]string, 
 	}
 	defer resp.Body.Close()
 
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, err
 	}
 
-	showData := data["data"].(map[string]interface{})["show"].(map[string]interface{})
-	episodesDetail := showData["availableEpisodesDetail"].(map[string]interface{})
-	episodesList := episodesDetail[mode].([]interface{})
+	showData := data["data"].(map[string]any)["show"].(map[string]any)
+	episodesDetail := showData["availableEpisodesDetail"].(map[string]any)
+	episodesList := episodesDetail[mode].([]any)
 
 	result := make([]string, 0, len(episodesList))
 	for _, ep := range episodesList {
@@ -385,7 +392,7 @@ func (c *AllAnimeClient) GetEpisodeLinks(showID, episode, mode string) ([]types.
 	}
 	`
 
-	variables := map[string]interface{}{
+	variables := map[string]any{
 		"showId":          showID,
 		"translationType": mode,
 		"episodeString":   episode,
@@ -401,9 +408,7 @@ func (c *AllAnimeClient) GetEpisodeLinks(showID, episode, mode string) ([]types.
 		return nil, err
 	}
 
-	for key, values := range c.headers {
-		req.Header[key] = values
-	}
+	maps.Copy(req.Header, c.headers)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -411,17 +416,17 @@ func (c *AllAnimeClient) GetEpisodeLinks(showID, episode, mode string) ([]types.
 	}
 	defer resp.Body.Close()
 
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, err
 	}
 
-	episodeData := data["data"].(map[string]interface{})["episode"].(map[string]interface{})
-	sourceUrls := episodeData["sourceUrls"].([]interface{})
+	episodeData := data["data"].(map[string]any)["episode"].(map[string]any)
+	sourceUrls := episodeData["sourceUrls"].([]any)
 
 	var links []types.AnimeStreamingSource
 	for _, source := range sourceUrls {
-		sourceMap := source.(map[string]interface{})
+		sourceMap := source.(map[string]any)
 		if sourceURL, ok := sourceMap["sourceUrl"].(string); ok {
 			sourceName := sourceMap["sourceName"].(string)
 			sourceInfo := c.processSourceURL(sourceURL, sourceName)

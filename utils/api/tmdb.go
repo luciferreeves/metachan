@@ -235,7 +235,7 @@ func getTVShowDetails(showID int) (*types.TMDBShowDetails, error) {
 	req.Header.Add("Accept", "application/json")
 
 	// Use our retry mechanism (3 retries)
-	resp, err := makeRequestWithRetries(req, 10)
+	resp, err := makeRequestWithRetries(req, 5)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get TV show details: %w", err)
 	}
