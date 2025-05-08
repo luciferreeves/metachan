@@ -33,12 +33,12 @@ func NewService() *Service {
 	}
 }
 
-// GetAnimeDetails fetches comprehensive anime details
-func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime, error) {
+// GetAnimeDetailsWithSource fetches comprehensive anime details with source information
+func (s *Service) GetAnimeDetailsWithSource(mapping *entities.AnimeMapping, source string) (*types.Anime, error) {
 	startTime := time.Now()
 	defer func() {
 		duration := time.Since(startTime)
-		logger.Log(fmt.Sprintf("GetAnimeDetails total execution time: %s", duration), logger.LogOptions{
+		logger.Log(fmt.Sprintf("GetAnimeDetails (%s) execution time: %s", source, duration), logger.LogOptions{
 			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
@@ -46,19 +46,27 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 
 	malID := mapping.MAL
 
-	// First, check if we have a valid cached version
-	cachedAnime, err := database.GetCachedAnimeByMALID(malID)
-	if err == nil && database.IsCacheValid(cachedAnime) {
-		logger.Log(fmt.Sprintf("Cache hit for anime (MAL ID: %d), returning cached data", malID), logger.LogOptions{
-			Level:  logger.Info,
-			Prefix: "AnimeCache",
-		})
+	// For updater source, always fetch fresh data and skip cache
+	if source != "updater" {
+		// First, check if we have a valid cached version
+		cachedAnime, err := database.GetCachedAnimeByMALID(malID)
+		if err == nil && database.IsCacheValid(cachedAnime) {
+			logger.Log(fmt.Sprintf("Cache hit for anime (MAL ID: %d), returning cached data", malID), logger.LogOptions{
+				Level:  logger.Info,
+				Prefix: "AnimeCache",
+			})
 
-		// Convert the cached anime to the types.Anime format
-		return database.ConvertToTypesAnime(cachedAnime), nil
+			// Convert the cached anime to the types.Anime format
+			return database.ConvertToTypesAnime(cachedAnime), nil
+		}
+	} else {
+		logger.Log(fmt.Sprintf("Bypassing cache for anime (MAL ID: %d) - source: %s", malID, source), logger.LogOptions{
+			Level:  logger.Info,
+			Prefix: "AnimeAPI",
+		})
 	}
 
-	// Cache miss or expired, fetch from external APIs
+	// Rest of the implementation is the same as GetAnimeDetails
 	logger.Log(fmt.Sprintf("Cache miss for anime (MAL ID: %d), fetching fresh data", malID), logger.LogOptions{
 		Level:  logger.Info,
 		Prefix: "AnimeAPI",
@@ -429,6 +437,11 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 	}
 
 	return animeDetails, nil
+}
+
+// GetAnimeDetails fetches comprehensive anime details
+func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime, error) {
+	return s.GetAnimeDetailsWithSource(mapping, "api")
 }
 
 // getSeasonDetails fetches details for anime seasons
