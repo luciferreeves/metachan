@@ -4,7 +4,11 @@ import (
 	"crypto/tls"
 	"fmt"
 	"metachan/types"
-	"metachan/utils/api"
+	"metachan/utils/api/anilist"
+	"metachan/utils/api/jikan"
+	"metachan/utils/api/malsync"
+	"metachan/utils/api/tmdb"
+	api "metachan/utils/api/tvdb"
 	"metachan/utils/logger"
 	"net/http"
 	"strings"
@@ -12,7 +16,7 @@ import (
 )
 
 // generateBasicEpisodes creates a basic list of episode data from Jikan episodes
-func generateBasicEpisodes(episodes []types.JikanAnimeEpisode) []types.AnimeSingleEpisode {
+func generateBasicEpisodes(episodes []jikan.JikanAnimeEpisode) []types.AnimeSingleEpisode {
 	var animeEpisodes []types.AnimeSingleEpisode
 
 	for _, episode := range episodes {
@@ -37,7 +41,7 @@ func generateBasicEpisodes(episodes []types.JikanAnimeEpisode) []types.AnimeSing
 }
 
 // getEpisodeCount determines the highest episode count from different sources
-func getEpisodeCount(malAnime *types.JikanAnimeResponse, anilistAnime *types.AnilistAnimeResponse) int {
+func getEpisodeCount(malAnime *jikan.JikanAnimeResponse, anilistAnime *anilist.AnilistAnimeResponse) int {
 	if anilistAnime == nil {
 		return malAnime.Data.Episodes
 	}
@@ -97,7 +101,7 @@ func sortSeasonsByAirDate(seasons *[]types.AnimeSeason) {
 }
 
 // generateGenres converts Jikan genre structures to our format
-func generateGenres(genres, explicitGenres []types.JikanGenericMALStructure) []types.AnimeGenres {
+func generateGenres(genres, explicitGenres []jikan.JikanGenericMALStructure) []types.AnimeGenres {
 	var animeGenres []types.AnimeGenres
 
 	// Add regular genres
@@ -122,7 +126,7 @@ func generateGenres(genres, explicitGenres []types.JikanGenericMALStructure) []t
 }
 
 // generateStudios converts Jikan studio structures to our format
-func generateStudios(studios []types.JikanGenericMALStructure) []types.AnimeStudio {
+func generateStudios(studios []jikan.JikanGenericMALStructure) []types.AnimeStudio {
 	var animeStudios []types.AnimeStudio
 
 	for _, studio := range studios {
@@ -137,7 +141,7 @@ func generateStudios(studios []types.JikanGenericMALStructure) []types.AnimeStud
 }
 
 // generateProducers converts Jikan producer structures to our format
-func generateProducers(producers []types.JikanGenericMALStructure) []types.AnimeProducer {
+func generateProducers(producers []jikan.JikanGenericMALStructure) []types.AnimeProducer {
 	var animeProducers []types.AnimeProducer
 
 	for _, producer := range producers {
@@ -152,7 +156,7 @@ func generateProducers(producers []types.JikanGenericMALStructure) []types.Anime
 }
 
 // generateLicensors converts Jikan licensor structures to our format
-func generateLicensors(licensors []types.JikanGenericMALStructure) []types.AnimeLicensor {
+func generateLicensors(licensors []jikan.JikanGenericMALStructure) []types.AnimeLicensor {
 	var animeLicensors []types.AnimeLicensor
 
 	for _, licensor := range licensors {
@@ -167,7 +171,7 @@ func generateLicensors(licensors []types.JikanGenericMALStructure) []types.Anime
 }
 
 // getAnimeCharacters processes character data from Jikan
-func getAnimeCharacters(characterResponse *types.JikanAnimeCharacterResponse) []types.AnimeCharacter {
+func getAnimeCharacters(characterResponse *jikan.JikanAnimeCharacterResponse) []types.AnimeCharacter {
 	var characters []types.AnimeCharacter
 
 	for _, entry := range characterResponse.Data {
@@ -196,10 +200,10 @@ func getAnimeCharacters(characterResponse *types.JikanAnimeCharacterResponse) []
 }
 
 // getNextAiringEpisode extracts next airing episode data from AniList
-func getNextAiringEpisode(anilistAnime *types.AnilistAnimeResponse) types.AnimeAiringEpisode {
+func getNextAiringEpisode(anilistAnime *anilist.AnilistAnimeResponse) types.AnimeAiringEpisode {
 	if anilistAnime == nil || anilistAnime.Data.Media.ID == 0 {
-		logger.Log("No valid AniList data for next airing episode", types.LogOptions{
-			Level:  types.Debug,
+		logger.Log("No valid AniList data for next airing episode", logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 		return types.AnimeAiringEpisode{}
@@ -210,16 +214,16 @@ func getNextAiringEpisode(anilistAnime *types.AnilistAnimeResponse) types.AnimeA
 
 	// Check if there is valid data
 	if nextEpisode.AiringAt == 0 && nextEpisode.Episode == 0 {
-		logger.Log(fmt.Sprintf("Anime ID %d has no next airing episode", anilistAnime.Data.Media.ID), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("Anime ID %d has no next airing episode", anilistAnime.Data.Media.ID), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 		return types.AnimeAiringEpisode{}
 	}
 
 	logger.Log(fmt.Sprintf("Found next airing episode %d at timestamp %d (in %d seconds)",
-		nextEpisode.Episode, nextEpisode.AiringAt, nextEpisode.TimeUntilAiring), types.LogOptions{
-		Level:  types.Debug,
+		nextEpisode.Episode, nextEpisode.AiringAt, nextEpisode.TimeUntilAiring), logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "AnimeAPI",
 	})
 
@@ -231,7 +235,7 @@ func getNextAiringEpisode(anilistAnime *types.AnilistAnimeResponse) types.AnimeA
 }
 
 // getAnimeSchedule extracts airing schedule data from AniList
-func getAnimeSchedule(anilistAnime *types.AnilistAnimeResponse) []types.AnimeAiringEpisode {
+func getAnimeSchedule(anilistAnime *anilist.AnilistAnimeResponse) []types.AnimeAiringEpisode {
 	if anilistAnime == nil {
 		return []types.AnimeAiringEpisode{}
 	}
@@ -240,8 +244,8 @@ func getAnimeSchedule(anilistAnime *types.AnilistAnimeResponse) []types.AnimeAir
 
 	// The nodes might be nil if there's no schedule
 	if anilistAnime.Data.Media.AiringSchedule.Nodes == nil {
-		logger.Log("No airing schedule found in AniList data", types.LogOptions{
-			Level:  types.Debug,
+		logger.Log("No airing schedule found in AniList data", logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 		return []types.AnimeAiringEpisode{}
@@ -255,8 +259,8 @@ func getAnimeSchedule(anilistAnime *types.AnilistAnimeResponse) []types.AnimeAir
 		})
 	}
 
-	logger.Log(fmt.Sprintf("Found %d episodes in airing schedule", len(schedule)), types.LogOptions{
-		Level:  types.Debug,
+	logger.Log(fmt.Sprintf("Found %d episodes in airing schedule", len(schedule)), logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "AnimeAPI",
 	})
 
@@ -265,10 +269,10 @@ func getAnimeSchedule(anilistAnime *types.AnilistAnimeResponse) []types.AnimeAir
 
 // AttachEpisodeDescriptions enhances episode information with external data
 // Imports the function from the anime utils to use in our service
-var AttachEpisodeDescriptions = api.AttachEpisodeDescriptions
+var AttachEpisodeDescriptions = tmdb.AttachEpisodeDescriptions
 
 // extractLogosFromMALSync extracts logo images from MALSync data
-func extractLogosFromMALSync(malSyncData *types.MALSyncAnimeResponse) types.AnimeLogos {
+func extractLogosFromMALSync(malSyncData *malsync.MALSyncAnimeResponse) types.AnimeLogos {
 	logos := types.AnimeLogos{}
 
 	// Early return if no data
@@ -279,8 +283,8 @@ func extractLogosFromMALSync(malSyncData *types.MALSyncAnimeResponse) types.Anim
 	// Check if Crunchyroll data exists in the MALSync response
 	crunchyrollSites, exists := malSyncData.Sites["Crunchyroll"]
 	if !exists || len(crunchyrollSites) == 0 {
-		logger.Log("No Crunchyroll data found in MALSync response", types.LogOptions{
-			Level:  types.Debug,
+		logger.Log("No Crunchyroll data found in MALSync response", logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 		return logos
@@ -294,8 +298,8 @@ func extractLogosFromMALSync(malSyncData *types.MALSyncAnimeResponse) types.Anim
 	}
 
 	if crURL == "" {
-		logger.Log("No valid Crunchyroll URL found", types.LogOptions{
-			Level:  types.Debug,
+		logger.Log("No valid Crunchyroll URL found", logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 		return logos
@@ -323,8 +327,8 @@ func extractLogosFromMALSync(malSyncData *types.MALSyncAnimeResponse) types.Anim
 	logos.XLarge = fmt.Sprintf("https://imgsrv.crunchyroll.com/cdn-cgi/image/fit=contain,format=auto,quality=85,width=%d/keyart/%s-title_logo-en-us", logoSizes["XLarge"], seriesID)
 	logos.Original = fmt.Sprintf("https://imgsrv.crunchyroll.com/cdn-cgi/image/fit=contain,format=auto,quality=85,width=%d/keyart/%s-title_logo-en-us", logoSizes["Original"], seriesID)
 
-	logger.Log(fmt.Sprintf("Successfully generated logo URLs for series ID: %s", seriesID), types.LogOptions{
-		Level:  types.Debug,
+	logger.Log(fmt.Sprintf("Successfully generated logo URLs for series ID: %s", seriesID), logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "AnimeAPI",
 	})
 
@@ -333,8 +337,8 @@ func extractLogosFromMALSync(malSyncData *types.MALSyncAnimeResponse) types.Anim
 
 // extractCrunchyrollSeriesID extracts the series ID from a Crunchyroll URL
 func extractCrunchyrollSeriesID(crURL string) string {
-	logger.Log(fmt.Sprintf("Attempting to extract series ID from URL: %s", crURL), types.LogOptions{
-		Level:  types.Debug,
+	logger.Log(fmt.Sprintf("Attempting to extract series ID from URL: %s", crURL), logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "AnimeAPI",
 	})
 
@@ -342,8 +346,8 @@ func extractCrunchyrollSeriesID(crURL string) string {
 	if strings.Contains(crURL, "/series/") {
 		parts := strings.Split(crURL, "/series/")
 		if len(parts) < 2 {
-			logger.Log("URL contains /series/ but couldn't extract ID part", types.LogOptions{
-				Level:  types.Debug,
+			logger.Log("URL contains /series/ but couldn't extract ID part", logger.LogOptions{
+				Level:  logger.Debug,
 				Prefix: "AnimeAPI",
 			})
 			return ""
@@ -351,23 +355,23 @@ func extractCrunchyrollSeriesID(crURL string) string {
 
 		idParts := strings.Split(parts[1], "/")
 		if len(idParts) < 1 {
-			logger.Log("Couldn't extract ID from path segments", types.LogOptions{
-				Level:  types.Debug,
+			logger.Log("Couldn't extract ID from path segments", logger.LogOptions{
+				Level:  logger.Debug,
 				Prefix: "AnimeAPI",
 			})
 			return ""
 		}
 
-		logger.Log(fmt.Sprintf("Found series ID directly in URL: %s", idParts[0]), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("Found series ID directly in URL: %s", idParts[0]), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 		return idParts[0]
 	}
 
 	// Need to follow redirect to get series ID
-	logger.Log("URL doesn't contain /series/, following redirect...", types.LogOptions{
-		Level:  types.Debug,
+	logger.Log("URL doesn't contain /series/, following redirect...", logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "AnimeAPI",
 	})
 
@@ -391,8 +395,8 @@ func extractCrunchyrollSeriesID(crURL string) string {
 	// Update HTTP to HTTPS for Crunchyroll URLs if needed
 	if strings.HasPrefix(crURL, "http://www.crunchyroll.com") {
 		crURL = strings.Replace(crURL, "http://", "https://", 1)
-		logger.Log(fmt.Sprintf("Updated URL to HTTPS: %s", crURL), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("Updated URL to HTTPS: %s", crURL), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 	}
@@ -400,8 +404,8 @@ func extractCrunchyrollSeriesID(crURL string) string {
 	// Add User-Agent header to mimic a browser
 	req, err := http.NewRequest("GET", crURL, nil)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Failed to create request for Crunchyroll URL: %v", err), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("Failed to create request for Crunchyroll URL: %v", err), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 		return ""
@@ -412,8 +416,8 @@ func extractCrunchyrollSeriesID(crURL string) string {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Failed to get Crunchyroll redirect: %v", err), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("Failed to get Crunchyroll redirect: %v", err), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 		return ""
@@ -421,14 +425,14 @@ func extractCrunchyrollSeriesID(crURL string) string {
 	defer resp.Body.Close()
 
 	// Log the status code and response headers for debugging
-	logger.Log(fmt.Sprintf("Crunchyroll response status: %d %s", resp.StatusCode, resp.Status), types.LogOptions{
-		Level:  types.Debug,
+	logger.Log(fmt.Sprintf("Crunchyroll response status: %d %s", resp.StatusCode, resp.Status), logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "AnimeAPI",
 	})
 
 	for name, values := range resp.Header {
-		logger.Log(fmt.Sprintf("Header %s: %s", name, strings.Join(values, ", ")), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("Header %s: %s", name, strings.Join(values, ", ")), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 	}
@@ -438,8 +442,8 @@ func extractCrunchyrollSeriesID(crURL string) string {
 		resp.StatusCode != http.StatusFound &&
 		resp.StatusCode != http.StatusTemporaryRedirect &&
 		resp.StatusCode != http.StatusPermanentRedirect {
-		logger.Log(fmt.Sprintf("Unexpected status code from Crunchyroll: %d", resp.StatusCode), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("Unexpected status code from Crunchyroll: %d", resp.StatusCode), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 
@@ -451,8 +455,8 @@ func extractCrunchyrollSeriesID(crURL string) string {
 			urlParts := strings.Split(crURL, "/")
 			if len(urlParts) > 0 {
 				potentialId := urlParts[len(urlParts)-1]
-				logger.Log(fmt.Sprintf("Extracted potential series ID from original URL: %s", potentialId), types.LogOptions{
-					Level:  types.Debug,
+				logger.Log(fmt.Sprintf("Extracted potential series ID from original URL: %s", potentialId), logger.LogOptions{
+					Level:  logger.Debug,
 					Prefix: "AnimeAPI",
 				})
 				return potentialId
@@ -463,15 +467,15 @@ func extractCrunchyrollSeriesID(crURL string) string {
 
 	redirectURL := resp.Header.Get("Location")
 	if redirectURL == "" {
-		logger.Log("No redirect URL found in Crunchyroll response", types.LogOptions{
-			Level:  types.Debug,
+		logger.Log("No redirect URL found in Crunchyroll response", logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 		return ""
 	}
 
-	logger.Log(fmt.Sprintf("Found redirect URL: %s", redirectURL), types.LogOptions{
-		Level:  types.Debug,
+	logger.Log(fmt.Sprintf("Found redirect URL: %s", redirectURL), logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "AnimeAPI",
 	})
 
@@ -487,8 +491,8 @@ func extractCrunchyrollSeriesID(crURL string) string {
 			return ""
 		}
 
-		logger.Log(fmt.Sprintf("Successfully extracted series ID from redirect: %s", idParts[0]), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("Successfully extracted series ID from redirect: %s", idParts[0]), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 		return idParts[0]
@@ -496,8 +500,8 @@ func extractCrunchyrollSeriesID(crURL string) string {
 
 	// For multi-level redirects, try to follow one more time
 	if strings.Contains(redirectURL, "crunchyroll.com") {
-		logger.Log("Trying to follow one more redirect level...", types.LogOptions{
-			Level:  types.Debug,
+		logger.Log("Trying to follow one more redirect level...", logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 		return extractCrunchyrollSeriesID(redirectURL)
@@ -508,15 +512,15 @@ func extractCrunchyrollSeriesID(crURL string) string {
 	urlParts := strings.Split(crURL, "/")
 	if len(urlParts) > 0 {
 		potentialId := urlParts[len(urlParts)-1]
-		logger.Log(fmt.Sprintf("Using fallback: extracted ID from original URL: %s", potentialId), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("Using fallback: extracted ID from original URL: %s", potentialId), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 		return potentialId
 	}
 
-	logger.Log("Could not extract series ID from Crunchyroll redirect URL", types.LogOptions{
-		Level:  types.Debug,
+	logger.Log("Could not extract series ID from Crunchyroll redirect URL", logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "AnimeAPI",
 	})
 	return ""

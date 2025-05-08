@@ -13,9 +13,9 @@ import (
 var Config *types.ServerConfig
 
 func init() {
-	logOptions := types.LogOptions{
+	logOptions := logger.LogOptions{
 		Prefix: "Config",
-		Level:  types.Error,
+		Level:  logger.Error,
 		Fatal:  true,
 	}
 
@@ -55,7 +55,7 @@ func init() {
 		logger.Log("Invalid TMDB read access token or TMDB read access token not set", logOptions)
 	}
 
-	logOptions.Level = types.Success
+	logOptions.Level = logger.Success
 	logOptions.Fatal = false
 	logger.Log("Config initialized successfully", logOptions)
 }

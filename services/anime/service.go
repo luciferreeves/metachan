@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"metachan/entities"
 	"metachan/types"
-	"metachan/utils/api"
+	"metachan/utils/api/anilist"
+	"metachan/utils/api/jikan"
+	"metachan/utils/api/malsync"
+	"metachan/utils/api/streaming"
 	"metachan/utils/concurrency"
 	"metachan/utils/logger"
 	"strings"
@@ -13,19 +16,19 @@ import (
 
 // Service provides high-level operations for anime data
 type Service struct {
-	jikanClient     *api.JikanClient
-	streamingClient *api.AllAnimeClient
-	anilistClient   *api.AniListClient
-	malsyncClient   *api.MALSyncClient
+	jikanClient     *jikan.JikanClient
+	streamingClient *streaming.AllAnimeClient
+	anilistClient   *anilist.AniListClient
+	malsyncClient   *malsync.MALSyncClient
 }
 
 // NewService creates a new anime service
 func NewService() *Service {
 	return &Service{
-		jikanClient:     api.NewJikanClient(),
-		streamingClient: api.NewAllAnimeClient(),
-		anilistClient:   api.NewAniListClient(),
-		malsyncClient:   api.NewMALSyncClient(),
+		jikanClient:     jikan.NewJikanClient(),
+		streamingClient: streaming.NewAllAnimeClient(),
+		anilistClient:   anilist.NewAniListClient(),
+		malsyncClient:   malsync.NewMALSyncClient(),
 	}
 }
 
@@ -34,8 +37,8 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 	startTime := time.Now()
 	defer func() {
 		duration := time.Since(startTime)
-		logger.Log(fmt.Sprintf("GetAnimeDetails total execution time: %s", duration), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("GetAnimeDetails total execution time: %s", duration), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 	}()
@@ -43,15 +46,15 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 	malID := mapping.MAL
 
 	// Create the different types of functions for proper Go generic type inference
-	animeFunc := func() (*types.JikanAnimeResponse, error) {
+	animeFunc := func() (*jikan.JikanAnimeResponse, error) {
 		return s.jikanClient.GetFullAnime(malID)
 	}
 
-	episodesFunc := func() (*types.JikanAnimeEpisodeResponse, error) {
+	episodesFunc := func() (*jikan.JikanAnimeEpisodeResponse, error) {
 		return s.jikanClient.GetAnimeEpisodes(malID)
 	}
 
-	charactersFunc := func() (*types.JikanAnimeCharacterResponse, error) {
+	charactersFunc := func() (*jikan.JikanAnimeCharacterResponse, error) {
 		return s.jikanClient.GetAnimeCharacters(malID)
 	}
 
@@ -60,8 +63,8 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 	animeResult := concurrency.Parallel(animeFunc)[0]
 	episodesResult := concurrency.Parallel(episodesFunc)[0]
 	charactersResult := concurrency.Parallel(charactersFunc)[0]
-	logger.Log(fmt.Sprintf("Initial parallel API fetch time: %s", time.Since(fetchStartTime)), types.LogOptions{
-		Level:  types.Debug,
+	logger.Log(fmt.Sprintf("Initial parallel API fetch time: %s", time.Since(fetchStartTime)), logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "AnimeAPI",
 	})
 
@@ -82,17 +85,17 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 	}
 
 	// Get Anilist and MALSync data in parallel if available
-	var anilistAnime *types.AnilistAnimeResponse
-	var malSyncData *types.MALSyncAnimeResponse
+	var anilistAnime *anilist.AnilistAnimeResponse
+	var malSyncData *malsync.MALSyncAnimeResponse
 
 	anilistStartTime := time.Now()
 	if mapping.Anilist != 0 {
 		// We need separate functions for each type for proper type inference
-		anilistFunc := func() (*types.AnilistAnimeResponse, error) {
+		anilistFunc := func() (*anilist.AnilistAnimeResponse, error) {
 			return s.anilistClient.GetAnime(mapping.Anilist)
 		}
 
-		malsyncFunc := func() (*types.MALSyncAnimeResponse, error) {
+		malsyncFunc := func() (*malsync.MALSyncAnimeResponse, error) {
 			return s.malsyncClient.GetAnimeByMALID(malID)
 		}
 
@@ -103,13 +106,13 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 		// Extract AniList result
 		if anilistResult.Error == nil {
 			anilistAnime = anilistResult.Value
-			logger.Log(fmt.Sprintf("Successfully fetched AniList data for ID %d", mapping.Anilist), types.LogOptions{
-				Level:  types.Debug,
+			logger.Log(fmt.Sprintf("Successfully fetched AniList data for ID %d", mapping.Anilist), logger.LogOptions{
+				Level:  logger.Debug,
 				Prefix: "AnimeAPI",
 			})
 		} else {
-			logger.Log(fmt.Sprintf("Failed to fetch AniList data: %v", anilistResult.Error), types.LogOptions{
-				Level:  types.Warn,
+			logger.Log(fmt.Sprintf("Failed to fetch AniList data: %v", anilistResult.Error), logger.LogOptions{
+				Level:  logger.Warn,
 				Prefix: "AnimeAPI",
 			})
 		}
@@ -118,21 +121,21 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 		if malsyncResult.Error == nil {
 			malSyncData = malsyncResult.Value
 		} else {
-			logger.Log(fmt.Sprintf("Failed to fetch MALSync data: %v", malsyncResult.Error), types.LogOptions{
-				Level:  types.Warn,
+			logger.Log(fmt.Sprintf("Failed to fetch MALSync data: %v", malsyncResult.Error), logger.LogOptions{
+				Level:  logger.Warn,
 				Prefix: "AnimeAPI",
 			})
 		}
 	} else {
-		logger.Log(fmt.Sprintf("No AniList ID available for MAL ID %d", malID), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("No AniList ID available for MAL ID %d", malID), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 		// If no AniList ID, just fetch MALSync data
 		malSyncData, _ = s.malsyncClient.GetAnimeByMALID(malID)
 	}
-	logger.Log(fmt.Sprintf("AniList and MALSync fetch time: %s", time.Since(anilistStartTime)), types.LogOptions{
-		Level:  types.Debug,
+	logger.Log(fmt.Sprintf("AniList and MALSync fetch time: %s", time.Since(anilistStartTime)), logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "AnimeAPI",
 	})
 
@@ -148,14 +151,14 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 		defer close(dubbedCountChan)
 
 		basicEpisodes := generateBasicEpisodes(episodes.Data)
-		logger.Log(fmt.Sprintf("Generated basic episodes: %d", len(basicEpisodes)), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("Generated basic episodes: %d", len(basicEpisodes)), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 
 		// Enrich episodes with TMDB data
-		logger.Log(fmt.Sprintf("Starting enrichEpisodes for %d episodes", len(basicEpisodes)), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("Starting enrichEpisodes for %d episodes", len(basicEpisodes)), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 		enrichStart := time.Now()
@@ -167,8 +170,8 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 		searchTitle := anime.Data.Title
 
 		startStreamingCheck := time.Now()
-		logger.Log("Fetching streaming episode counts...", types.LogOptions{
-			Level:  types.Debug,
+		logger.Log("Fetching streaming episode counts...", logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 
@@ -187,21 +190,21 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 
 			// Log the final error if all attempts failed
 			if err != nil {
-				logger.Log(fmt.Sprintf("Failed to fetch streaming counts after all attempts: %v", err), types.LogOptions{
-					Level:  types.Warn,
+				logger.Log(fmt.Sprintf("Failed to fetch streaming counts after all attempts: %v", err), logger.LogOptions{
+					Level:  logger.Warn,
 					Prefix: "AnimeAPI",
 				})
 			}
 		}
 
 		logger.Log(fmt.Sprintf("Streaming count check took %s. Subbed: %d, Dubbed: %d",
-			time.Since(startStreamingCheck), subCount, dubCount), types.LogOptions{
-			Level:  types.Debug,
+			time.Since(startStreamingCheck), subCount, dubCount), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 
-		logger.Log(fmt.Sprintf("enrichEpisodes execution time: %s", time.Since(enrichStart)), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("enrichEpisodes execution time: %s", time.Since(enrichStart)), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 
@@ -214,21 +217,21 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 	seasonsStartTime := time.Now()
 	var seasons []types.AnimeSeason
 	if mapping.TVDB != 0 {
-		logger.Log(fmt.Sprintf("Finding season mappings for TVDB ID %d", mapping.TVDB), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("Finding season mappings for TVDB ID %d", mapping.TVDB), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "TVDB",
 		})
 		seasonMappings, err := FindSeasonMappings(mapping.TVDB)
 		if err == nil && len(seasonMappings) > 0 {
-			logger.Log(fmt.Sprintf("Found %d season mappings for TVDB ID %d", len(seasonMappings), mapping.TVDB), types.LogOptions{
-				Level:  types.Debug,
+			logger.Log(fmt.Sprintf("Found %d season mappings for TVDB ID %d", len(seasonMappings), mapping.TVDB), logger.LogOptions{
+				Level:  logger.Debug,
 				Prefix: "TVDB",
 			})
 			seasons = s.getSeasonDetails(&seasonMappings, malID)
 		}
 	}
-	logger.Log(fmt.Sprintf("Seasons fetch time: %s", time.Since(seasonsStartTime)), types.LogOptions{
-		Level:  types.Debug,
+	logger.Log(fmt.Sprintf("Seasons fetch time: %s", time.Since(seasonsStartTime)), logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "AnimeAPI",
 	})
 
@@ -248,8 +251,8 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 	}
 
 	// Wait for episode data to complete
-	logger.Log(fmt.Sprintf("Waiting for episode data processing (started %s ago)", time.Since(episodeProcessingStartTime)), types.LogOptions{
-		Level:  types.Debug,
+	logger.Log(fmt.Sprintf("Waiting for episode data processing (started %s ago)", time.Since(episodeProcessingStartTime)), logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "AnimeAPI",
 	})
 	episodeWaitStartTime := time.Now()
@@ -258,8 +261,8 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 	dubbedCount := <-dubbedCountChan
 	logger.Log(fmt.Sprintf("Episode data wait time: %s (total episode processing time: %s)",
 		time.Since(episodeWaitStartTime),
-		time.Since(episodeProcessingStartTime)), types.LogOptions{
-		Level:  types.Debug,
+		time.Since(episodeProcessingStartTime)), logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "AnimeAPI",
 	})
 
@@ -350,8 +353,8 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 
 	// Add AniList cover images and color if available
 	if anilistAnime != nil && anilistAnime.Data.Media.ID > 0 {
-		logger.Log("Setting covers and color from AniList data", types.LogOptions{
-			Level:  types.Debug,
+		logger.Log("Setting covers and color from AniList data", logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 
@@ -368,14 +371,14 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 		// For color, also make sure it's not empty
 		if coverImage.Color != "" {
 			animeDetails.Color = coverImage.Color
-			logger.Log(fmt.Sprintf("Set color to: %s", coverImage.Color), types.LogOptions{
-				Level:  types.Debug,
+			logger.Log(fmt.Sprintf("Set color to: %s", coverImage.Color), logger.LogOptions{
+				Level:  logger.Debug,
 				Prefix: "AnimeAPI",
 			})
 		}
 	} else {
-		logger.Log("No valid AniList data available for covers and color", types.LogOptions{
-			Level:  types.Debug,
+		logger.Log("No valid AniList data available for covers and color", logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
 		})
 	}

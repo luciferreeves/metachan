@@ -28,8 +28,8 @@ func (tm *TaskManager) RegisterTask(task types.Task) error {
 	}
 
 	tm.Tasks[task.Name] = task
-	logger.Log(fmt.Sprintf("Task %s registered", task.Name), types.LogOptions{
-		Level:  types.Info,
+	logger.Log(fmt.Sprintf("Task %s registered", task.Name), logger.LogOptions{
+		Level:  logger.Info,
 		Prefix: "TaskManager",
 	})
 
@@ -60,8 +60,8 @@ func (tm *TaskManager) logTaskExecution(taskName, status, message string) {
 	}
 
 	if err := tm.Database.Create(&logEntry).Error; err != nil {
-		logger.Log(fmt.Sprintf("Failed to log task execution for %s: %v", taskName, err), types.LogOptions{
-			Level:  types.Warn,
+		logger.Log(fmt.Sprintf("Failed to log task execution for %s: %v", taskName, err), logger.LogOptions{
+			Level:  logger.Warn,
 			Prefix: "TaskManager",
 		})
 	}
@@ -72,8 +72,8 @@ func (tm *TaskManager) StartTask(taskName string) {
 	task, exists := tm.Tasks[taskName]
 	tm.Mutex.Unlock()
 	if !exists {
-		logger.Log(fmt.Sprintf("Task %s not found", taskName), types.LogOptions{
-			Level:  types.Warn,
+		logger.Log(fmt.Sprintf("Task %s not found", taskName), logger.LogOptions{
+			Level:  logger.Warn,
 			Prefix: "TaskManager",
 		})
 		return
@@ -84,8 +84,8 @@ func (tm *TaskManager) StartTask(taskName string) {
 
 	shouldExec, err := tm.shouldExecuteTask(taskName, task.Interval)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Error checking execution condition for task %s: %v", taskName, err), types.LogOptions{
-			Level:  types.Error,
+		logger.Log(fmt.Sprintf("Error checking execution condition for task %s: %v", taskName, err), logger.LogOptions{
+			Level:  logger.Error,
 			Prefix: "TaskManager",
 		})
 		return
@@ -101,15 +101,15 @@ func (tm *TaskManager) StartTask(taskName string) {
 		if shouldExec {
 			if err := task.Execute(); err != nil {
 				tm.logTaskExecution(taskName, "error", err.Error())
-				logger.Log(fmt.Sprintf("Task %s execution failed: %v", taskName, err), types.LogOptions{
-					Level:  types.Error,
+				logger.Log(fmt.Sprintf("Task %s execution failed: %v", taskName, err), logger.LogOptions{
+					Level:  logger.Error,
 					Prefix: "TaskManager",
 				})
 			} else {
 				task.LastRun = time.Now()
 				tm.logTaskExecution(taskName, "success", "Task executed successfully")
-				logger.Log(fmt.Sprintf("Task %s executed successfully", taskName), types.LogOptions{
-					Level:  types.Success,
+				logger.Log(fmt.Sprintf("Task %s executed successfully", taskName), logger.LogOptions{
+					Level:  logger.Success,
 					Prefix: "TaskManager",
 				})
 			}
@@ -125,8 +125,8 @@ func (tm *TaskManager) StartTask(taskName string) {
 				}
 			}
 
-			logger.Log(fmt.Sprintf("Task %s will run in %v", taskName, initialDelay), types.LogOptions{
-				Level:  types.Info,
+			logger.Log(fmt.Sprintf("Task %s will run in %v", taskName, initialDelay), logger.LogOptions{
+				Level:  logger.Info,
 				Prefix: "TaskManager",
 			})
 
@@ -135,15 +135,15 @@ func (tm *TaskManager) StartTask(taskName string) {
 			case <-time.After(initialDelay):
 				if err := task.Execute(); err != nil {
 					tm.logTaskExecution(taskName, "error", err.Error())
-					logger.Log(fmt.Sprintf("Task %s execution failed: %v", taskName, err), types.LogOptions{
-						Level:  types.Error,
+					logger.Log(fmt.Sprintf("Task %s execution failed: %v", taskName, err), logger.LogOptions{
+						Level:  logger.Error,
 						Prefix: "TaskManager",
 					})
 				} else {
 					task.LastRun = time.Now()
 					tm.logTaskExecution(taskName, "success", "Task executed successfully")
-					logger.Log(fmt.Sprintf("Task %s executed successfully", taskName), types.LogOptions{
-						Level:  types.Success,
+					logger.Log(fmt.Sprintf("Task %s executed successfully", taskName), logger.LogOptions{
+						Level:  logger.Success,
 						Prefix: "TaskManager",
 					})
 				}
@@ -164,15 +164,15 @@ func (tm *TaskManager) StartTask(taskName string) {
 			case <-ticker.C:
 				if err := task.Execute(); err != nil {
 					tm.logTaskExecution(taskName, "error", err.Error())
-					logger.Log(fmt.Sprintf("Task %s execution failed: %v", taskName, err), types.LogOptions{
-						Level:  types.Error,
+					logger.Log(fmt.Sprintf("Task %s execution failed: %v", taskName, err), logger.LogOptions{
+						Level:  logger.Error,
 						Prefix: "TaskManager",
 					})
 				} else {
 					task.LastRun = time.Now()
 					tm.logTaskExecution(taskName, "success", "Task executed successfully")
-					logger.Log(fmt.Sprintf("Task %s executed successfully", taskName), types.LogOptions{
-						Level:  types.Success,
+					logger.Log(fmt.Sprintf("Task %s executed successfully", taskName), logger.LogOptions{
+						Level:  logger.Success,
 						Prefix: "TaskManager",
 					})
 				}
@@ -183,8 +183,8 @@ func (tm *TaskManager) StartTask(taskName string) {
 		}
 	}()
 
-	logger.Log(fmt.Sprintf("Task %s scheduled with interval %v", taskName, task.Interval), types.LogOptions{
-		Level:  types.Info,
+	logger.Log(fmt.Sprintf("Task %s scheduled with interval %v", taskName, task.Interval), logger.LogOptions{
+		Level:  logger.Info,
 		Prefix: "TaskManager",
 	})
 }
@@ -197,8 +197,8 @@ func (tm *TaskManager) StopTask(taskName string) {
 		close(doneChan)
 		delete(tm.Done, taskName)
 		delete(tm.Tickers, taskName)
-		logger.Log(fmt.Sprintf("Task %s stopped", taskName), types.LogOptions{
-			Level:  types.Info,
+		logger.Log(fmt.Sprintf("Task %s stopped", taskName), logger.LogOptions{
+			Level:  logger.Info,
 			Prefix: "TaskManager",
 		})
 	}
@@ -228,8 +228,8 @@ func (tm *TaskManager) StopAllTasks() {
 			ticker.Stop()
 			delete(tm.Tickers, name)
 		}
-		logger.Log(fmt.Sprintf("Task %s stopped", name), types.LogOptions{
-			Level:  types.Info,
+		logger.Log(fmt.Sprintf("Task %s stopped", name), logger.LogOptions{
+			Level:  logger.Info,
 			Prefix: "TaskManager",
 		})
 	}
@@ -255,8 +255,8 @@ func (tm *TaskManager) GetTaskStatus(taskName string) *types.TaskStatus {
 			nextRun = &next
 		}
 	} else if err != gorm.ErrRecordNotFound {
-		logger.Log(fmt.Sprintf("Error fetching task log for %s: %v", taskName, err), types.LogOptions{
-			Level:  types.Error,
+		logger.Log(fmt.Sprintf("Error fetching task log for %s: %v", taskName, err), logger.LogOptions{
+			Level:  logger.Error,
 			Prefix: "TaskManager",
 		})
 	}

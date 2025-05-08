@@ -1,4 +1,4 @@
-package api
+package jikan
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"metachan/types"
 	"metachan/utils/ratelimit"
 	"net/http"
 	"strconv"
@@ -121,7 +120,7 @@ func (c *JikanClient) makeRequest(ctx context.Context, url string) ([]byte, erro
 }
 
 // GetAnime fetches basic anime information by MAL ID
-func (c *JikanClient) GetAnime(malID int) (*types.JikanAnimeResponse, error) {
+func (c *JikanClient) GetAnime(malID int) (*JikanAnimeResponse, error) {
 	apiURL := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d", malID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -132,7 +131,7 @@ func (c *JikanClient) GetAnime(malID int) (*types.JikanAnimeResponse, error) {
 		return nil, fmt.Errorf("failed to get anime data: %w", err)
 	}
 
-	var animeResponse types.JikanAnimeResponse
+	var animeResponse JikanAnimeResponse
 	if err := json.Unmarshal(bodyBytes, &animeResponse); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
@@ -145,7 +144,7 @@ func (c *JikanClient) GetAnime(malID int) (*types.JikanAnimeResponse, error) {
 }
 
 // GetFullAnime fetches detailed anime information by MAL ID
-func (c *JikanClient) GetFullAnime(malID int) (*types.JikanAnimeResponse, error) {
+func (c *JikanClient) GetFullAnime(malID int) (*JikanAnimeResponse, error) {
 	apiURL := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d/full", malID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -156,7 +155,7 @@ func (c *JikanClient) GetFullAnime(malID int) (*types.JikanAnimeResponse, error)
 		return nil, fmt.Errorf("failed to get anime full data: %w", err)
 	}
 
-	var animeResponse types.JikanAnimeResponse
+	var animeResponse JikanAnimeResponse
 	if err := json.Unmarshal(bodyBytes, &animeResponse); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
@@ -169,9 +168,9 @@ func (c *JikanClient) GetFullAnime(malID int) (*types.JikanAnimeResponse, error)
 }
 
 // GetAnimeEpisodes fetches all episodes for an anime by MAL ID
-func (c *JikanClient) GetAnimeEpisodes(malID int) (*types.JikanAnimeEpisodeResponse, error) {
-	result := types.JikanAnimeEpisodeResponse{
-		Data: []types.JikanAnimeEpisode{},
+func (c *JikanClient) GetAnimeEpisodes(malID int) (*JikanAnimeEpisodeResponse, error) {
+	result := JikanAnimeEpisodeResponse{
+		Data: []JikanAnimeEpisode{},
 	}
 
 	maxPages := 25 // Safety limit to avoid excessive requests
@@ -198,7 +197,7 @@ func (c *JikanClient) GetAnimeEpisodes(malID int) (*types.JikanAnimeEpisodeRespo
 			return nil, fmt.Errorf("failed to get anime episodes page %d: %w", page, err)
 		}
 
-		var pageResponse types.JikanAnimeEpisodeResponse
+		var pageResponse JikanAnimeEpisodeResponse
 		if err := json.Unmarshal(bodyBytes, &pageResponse); err != nil {
 			// Return what we have if we got some pages successfully
 			if len(result.Data) > 0 {
@@ -224,7 +223,7 @@ func (c *JikanClient) GetAnimeEpisodes(malID int) (*types.JikanAnimeEpisodeRespo
 }
 
 // GetAnimeCharacters fetches all characters for an anime by MAL ID
-func (c *JikanClient) GetAnimeCharacters(malID int) (*types.JikanAnimeCharacterResponse, error) {
+func (c *JikanClient) GetAnimeCharacters(malID int) (*JikanAnimeCharacterResponse, error) {
 	apiURL := fmt.Sprintf("https://api.jikan.moe/v4/anime/%d/characters", malID)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -235,7 +234,7 @@ func (c *JikanClient) GetAnimeCharacters(malID int) (*types.JikanAnimeCharacterR
 		return nil, fmt.Errorf("failed to get anime characters: %w", err)
 	}
 
-	var characterResponse types.JikanAnimeCharacterResponse
+	var characterResponse JikanAnimeCharacterResponse
 	if err := json.Unmarshal(bodyBytes, &characterResponse); err != nil {
 		return nil, fmt.Errorf("failed to decode characters response: %w", err)
 	}

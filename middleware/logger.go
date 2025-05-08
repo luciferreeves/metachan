@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"fmt"
-	"metachan/types"
 	"metachan/utils/logger"
 	"strconv"
 	"strings"
@@ -35,13 +34,13 @@ func HTTPLogger() fiber.Handler {
 		// Format with consistent spacing and alignment
 		message := fmt.Sprintf("%s %s%-3d%s %-15s %-10s %-s",
 			paddedMethod,
-			messageColor, status, types.Reset,
+			messageColor, status, logger.Reset,
 			"IP: "+ip,
 			"TTR: "+formatDuration(duration),
 			"Path: "+path,
 		)
 
-		logger.Log(message, types.LogOptions{
+		logger.Log(message, logger.LogOptions{
 			Prefix: "HTTP",
 			Level:  level,
 		})
@@ -50,35 +49,35 @@ func HTTPLogger() fiber.Handler {
 	}
 }
 
-func getLogLevel(status int) types.LogLevel {
+func getLogLevel(status int) logger.LogLevel {
 	switch {
 	case status >= 500:
-		return types.Error
+		return logger.Error
 	case status >= 400:
-		return types.Warn
+		return logger.Warn
 	case status >= 300:
-		return types.Info
+		return logger.Info
 	case status >= 200:
-		return types.Success
+		return logger.Success
 	default:
-		return types.Info
+		return logger.Info
 	}
 }
 
-func getMessageColor(level types.LogLevel) string {
+func getMessageColor(level logger.LogLevel) string {
 	switch level {
-	case types.Info:
-		return types.MessageColorInfo
-	case types.Warn:
-		return types.MessageColorWarn
-	case types.Error:
-		return types.MessageColorError
-	case types.Debug:
-		return types.MessageColorDebug
-	case types.Success:
-		return types.MessageColorSuccess
+	case logger.Info:
+		return logger.MessageColorInfo
+	case logger.Warn:
+		return logger.MessageColorWarn
+	case logger.Error:
+		return logger.MessageColorError
+	case logger.Debug:
+		return logger.MessageColorDebug
+	case logger.Success:
+		return logger.MessageColorSuccess
 	default:
-		return types.MessageColorInfo
+		return logger.MessageColorInfo
 	}
 }
 

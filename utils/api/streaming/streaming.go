@@ -1,10 +1,9 @@
-package api
+package streaming
 
 import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"metachan/types"
 	"metachan/utils/mappers"
 	"net/http"
 	"net/url"
@@ -17,21 +16,6 @@ import (
 const (
 	allanimeBaseURL = "https://api.allanime.day/api"
 )
-
-// AllAnimeClient provides methods for interacting with the AllAnime API
-type AllAnimeClient struct {
-	client  *http.Client
-	headers http.Header
-}
-
-// StreamingSearchResult represents a search result from AllAnime
-type StreamingSearchResult struct {
-	ID          string  `json:"_id"`
-	Name        string  `json:"name"`
-	SubEpisodes int     `json:"sub_episodes"`
-	DubEpisodes int     `json:"dub_episodes"`
-	Similarity  float64 `json:"similarity"`
-}
 
 // NewAllAnimeClient creates a new AllAnime client
 func NewAllAnimeClient() *AllAnimeClient {
@@ -163,7 +147,7 @@ func (c *AllAnimeClient) getClockLink(urlStr string) (string, error) {
 }
 
 // processSourceURL processes a streaming source URL from AllAnime
-func (c *AllAnimeClient) processSourceURL(sourceURL, sourceType string) *types.AnimeStreamingSource {
+func (c *AllAnimeClient) processSourceURL(sourceURL, sourceType string) *AnimeStreamingSource {
 	var decodedURL string
 	if strings.HasPrefix(sourceURL, "--") {
 		decodedURL = c.decodeURL(sourceURL)
@@ -176,7 +160,7 @@ func (c *AllAnimeClient) processSourceURL(sourceURL, sourceType string) *types.A
 	// Check if it's a clock link
 	if strings.Contains(processedURL, "/apivtwo/clock") {
 		if directURL, err := c.getClockLink(processedURL); err == nil {
-			return &types.AnimeStreamingSource{
+			return &AnimeStreamingSource{
 				URL:    directURL,
 				Server: getServerName(sourceType),
 				Type:   "direct",
@@ -188,7 +172,7 @@ func (c *AllAnimeClient) processSourceURL(sourceURL, sourceType string) *types.A
 	directPatterns := []string{"fast4speed.rsvp", "sharepoint.com", ".m3u8", ".mp4"}
 	for _, pattern := range directPatterns {
 		if strings.Contains(processedURL, pattern) {
-			return &types.AnimeStreamingSource{
+			return &AnimeStreamingSource{
 				URL:    processedURL,
 				Server: getServerName(sourceType),
 				Type:   "direct",
@@ -197,7 +181,7 @@ func (c *AllAnimeClient) processSourceURL(sourceURL, sourceType string) *types.A
 	}
 
 	// Return as regular source if not direct
-	return &types.AnimeStreamingSource{
+	return &AnimeStreamingSource{
 		URL:    processedURL,
 		Server: getServerName(sourceType),
 		Type:   "embed",
@@ -378,7 +362,7 @@ func (c *AllAnimeClient) GetEpisodesList(showID string, mode string) ([]string, 
 }
 
 // GetEpisodeLinks gets streaming links for a specific episode
-func (c *AllAnimeClient) GetEpisodeLinks(showID, episode, mode string) ([]types.AnimeStreamingSource, error) {
+func (c *AllAnimeClient) GetEpisodeLinks(showID, episode, mode string) ([]AnimeStreamingSource, error) {
 	episodeQuery := `
 	query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) {
 		episode(
@@ -424,7 +408,7 @@ func (c *AllAnimeClient) GetEpisodeLinks(showID, episode, mode string) ([]types.
 	episodeData := data["data"].(map[string]any)["episode"].(map[string]any)
 	sourceUrls := episodeData["sourceUrls"].([]any)
 
-	var links []types.AnimeStreamingSource
+	var links []AnimeStreamingSource
 	for _, source := range sourceUrls {
 		sourceMap := source.(map[string]any)
 		if sourceURL, ok := sourceMap["sourceUrl"].(string); ok {
@@ -442,7 +426,7 @@ func (c *AllAnimeClient) GetEpisodeLinks(showID, episode, mode string) ([]types.
 }
 
 // GetStreamingSources fetches both sub and dub streaming sources for an anime episode
-func (c *AllAnimeClient) GetStreamingSources(title string, episodeNumber int) (*types.AnimeStreaming, error) {
+func (c *AllAnimeClient) GetStreamingSources(title string, episodeNumber int) (*AnimeStreaming, error) {
 	// Search for the anime
 	searchResults, err := c.SearchAnime(title)
 	if err != nil {
@@ -456,9 +440,9 @@ func (c *AllAnimeClient) GetStreamingSources(title string, episodeNumber int) (*
 	// Use the best match (first result)
 	bestMatch := searchResults[0]
 
-	streaming := &types.AnimeStreaming{
-		Sub: []types.AnimeStreamingSource{},
-		Dub: []types.AnimeStreamingSource{},
+	streaming := &AnimeStreaming{
+		Sub: []AnimeStreamingSource{},
+		Dub: []AnimeStreamingSource{},
 	}
 
 	// Get sub episodes if available

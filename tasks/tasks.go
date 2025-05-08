@@ -27,8 +27,8 @@ func init() {
 	})
 
 	if err != nil {
-		logger.Log(fmt.Sprintf("Failed to register task: %v", err), types.LogOptions{
-			Level:  types.Error,
+		logger.Log(fmt.Sprintf("Failed to register task: %v", err), logger.LogOptions{
+			Level:  logger.Error,
 			Prefix: "TaskManager",
 		})
 	}

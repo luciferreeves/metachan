@@ -3,7 +3,6 @@ package controllers
 import (
 	"metachan/database"
 	animeService "metachan/services/anime"
-	"metachan/types"
 	"metachan/utils/logger"
 	"metachan/utils/mappers"
 
@@ -40,8 +39,8 @@ func GetAnimeByMALID(c *fiber.Ctx) error {
 	service := getAnimeService()
 	anime, err := service.GetAnimeDetails(mapping)
 	if err != nil {
-		logger.Log("Failed to fetch anime details: "+err.Error(), types.LogOptions{
-			Level:  types.Error,
+		logger.Log("Failed to fetch anime details: "+err.Error(), logger.LogOptions{
+			Level:  logger.Error,
 			Prefix: "AnimeAPI",
 		})
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{

@@ -5,8 +5,6 @@ import (
 	"os"
 	"strings"
 	"time"
-
-	"metachan/types"
 )
 
 const prefixWidth = 15
@@ -15,47 +13,47 @@ func getTimestamp() string {
 	return time.Now().Format(time.RFC3339)
 }
 
-func getLevelColor(level types.LogLevel) string {
+func getLevelColor(level LogLevel) string {
 	switch level {
-	case types.Info:
-		return types.LevelColorInfo
-	case types.Warn:
-		return types.LevelColorWarn
-	case types.Error:
-		return types.LevelColorError
-	case types.Debug:
-		return types.LevelColorDebug
-	case types.Success:
-		return types.LevelColorSuccess
+	case Info:
+		return LevelColorInfo
+	case Warn:
+		return LevelColorWarn
+	case Error:
+		return LevelColorError
+	case Debug:
+		return LevelColorDebug
+	case Success:
+		return LevelColorSuccess
 	default:
-		return types.LevelColorInfo
+		return LevelColorInfo
 	}
 }
 
-func getMessageColor(level types.LogLevel) string {
+func getMessageColor(level LogLevel) string {
 	switch level {
-	case types.Info:
-		return types.MessageColorInfo
-	case types.Warn:
-		return types.MessageColorWarn
-	case types.Error:
-		return types.MessageColorError
-	case types.Debug:
-		return types.MessageColorDebug
-	case types.Success:
-		return types.MessageColorSuccess
+	case Info:
+		return MessageColorInfo
+	case Warn:
+		return MessageColorWarn
+	case Error:
+		return MessageColorError
+	case Debug:
+		return MessageColorDebug
+	case Success:
+		return MessageColorSuccess
 	default:
-		return types.MessageColorInfo
+		return MessageColorInfo
 	}
 }
 
-func Log(message interface{}, options types.LogOptions) {
+func Log(message interface{}, options LogOptions) {
 	var builder strings.Builder
 
 	if options.Timestamp {
-		builder.WriteString(types.Gray)
+		builder.WriteString(Gray)
 		builder.WriteString(getTimestamp())
-		builder.WriteString(types.Reset)
+		builder.WriteString(Reset)
 		builder.WriteString(" ")
 	}
 
@@ -70,11 +68,11 @@ func Log(message interface{}, options types.LogOptions) {
 			padding = strings.Repeat(" ", prefixWidth-totalWidth)
 		}
 
-		builder.WriteString(types.Cyan)
+		builder.WriteString(Cyan)
 		builder.WriteString("[")
 		builder.WriteString(options.Prefix)
 		builder.WriteString("]")
-		builder.WriteString(types.Reset)
+		builder.WriteString(Reset)
 		builder.WriteString(padding)
 		builder.WriteString(" ")
 	}
@@ -90,10 +88,10 @@ func Log(message interface{}, options types.LogOptions) {
 		builder.WriteString(fmt.Sprintf("%v", msg))
 	}
 
-	builder.WriteString(types.Reset)
+	builder.WriteString(Reset)
 	builder.WriteString("\n")
 
-	if options.Level == types.Error || options.Level == types.Warn {
+	if options.Level == Error || options.Level == Warn {
 		os.Stderr.WriteString(builder.String())
 	} else {
 		os.Stdout.WriteString(builder.String())

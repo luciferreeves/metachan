@@ -7,7 +7,6 @@ import (
 	"metachan/middleware"
 	"metachan/router"
 	"metachan/tasks"
-	"metachan/types"
 	"metachan/utils/logger"
 
 	"github.com/gofiber/fiber/v2"
@@ -36,15 +35,15 @@ func main() {
 
 	// Start the server
 	if err := app.Listen(fmt.Sprintf(":%d", config.Config.Port)); err != nil {
-		logger.Log(fmt.Sprintf("Failed to the start the server on port %d: %v", config.Config.Port, err), types.LogOptions{
+		logger.Log(fmt.Sprintf("Failed to the start the server on port %d: %v", config.Config.Port, err), logger.LogOptions{
 			Prefix: "Main",
-			Level:  types.Error,
+			Level:  logger.Error,
 			Fatal:  true,
 		})
 	}
 
-	logger.Log(fmt.Sprintf("Server started on port %d", config.Config.Port), types.LogOptions{
+	logger.Log(fmt.Sprintf("Server started on port %d", config.Config.Port), logger.LogOptions{
 		Prefix: "Main",
-		Level:  types.Success,
+		Level:  logger.Success,
 	})
 }

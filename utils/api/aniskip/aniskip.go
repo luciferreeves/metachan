@@ -1,11 +1,10 @@
-package api
+package aniskip
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"metachan/types"
 	"metachan/utils/logger"
 	"metachan/utils/ratelimit"
 	"net/http"
@@ -22,7 +21,7 @@ type AniSkipClient struct {
 	client      *http.Client
 	rateLimiter *ratelimit.RateLimiter
 	maxRetries  int
-	cache       map[string][]types.AnimeSkipTimes
+	cache       map[string][]AnimeSkipTimes
 	cacheMutex  sync.RWMutex
 	cacheTTL    time.Duration
 	cacheTime   map[string]time.Time
@@ -31,7 +30,7 @@ type AniSkipClient struct {
 // EpisodeSkipTimesResult contains skip times for a specific episode
 type EpisodeSkipTimesResult struct {
 	EpisodeNumber int
-	SkipTimes     []types.AnimeSkipTimes
+	SkipTimes     []AnimeSkipTimes
 }
 
 // NewAniSkipClient creates a new client for the AniSkip API
@@ -42,7 +41,7 @@ func NewAniSkipClient() *AniSkipClient {
 		},
 		rateLimiter: ratelimit.NewRateLimiter(10, 10*time.Second), // Conservative rate limit
 		maxRetries:  2,
-		cache:       make(map[string][]types.AnimeSkipTimes),
+		cache:       make(map[string][]AnimeSkipTimes),
 		cacheTime:   make(map[string]time.Time),
 		cacheTTL:    24 * time.Hour, // Cache skip times for 24 hours
 	}
@@ -54,7 +53,7 @@ func (c *AniSkipClient) getCacheKey(malID, episode int) string {
 }
 
 // getFromCache tries to get skip times from cache
-func (c *AniSkipClient) getFromCache(malID, episode int) ([]types.AnimeSkipTimes, bool) {
+func (c *AniSkipClient) getFromCache(malID, episode int) ([]AnimeSkipTimes, bool) {
 	key := c.getCacheKey(malID, episode)
 
 	c.cacheMutex.RLock()
@@ -72,7 +71,7 @@ func (c *AniSkipClient) getFromCache(malID, episode int) ([]types.AnimeSkipTimes
 }
 
 // saveToCache saves skip times to cache
-func (c *AniSkipClient) saveToCache(malID, episode int, skipTimes []types.AnimeSkipTimes) {
+func (c *AniSkipClient) saveToCache(malID, episode int, skipTimes []AnimeSkipTimes) {
 	key := c.getCacheKey(malID, episode)
 
 	c.cacheMutex.Lock()
@@ -83,7 +82,7 @@ func (c *AniSkipClient) saveToCache(malID, episode int, skipTimes []types.AnimeS
 }
 
 // GetSkipTimesForEpisode fetches skip times for a specific anime episode
-func (c *AniSkipClient) GetSkipTimesForEpisode(malID, episodeNumber int) ([]types.AnimeSkipTimes, error) {
+func (c *AniSkipClient) GetSkipTimesForEpisode(malID, episodeNumber int) ([]AnimeSkipTimes, error) {
 	// Check cache first
 	if skipTimes, found := c.getFromCache(malID, episodeNumber); found {
 		return skipTimes, nil
@@ -123,8 +122,8 @@ func (c *AniSkipClient) GetSkipTimesForEpisode(malID, episodeNumber int) ([]type
 
 		if resp.StatusCode == http.StatusNotFound {
 			// No skip times found, not an error
-			c.saveToCache(malID, episodeNumber, []types.AnimeSkipTimes{})
-			return []types.AnimeSkipTimes{}, nil
+			c.saveToCache(malID, episodeNumber, []AnimeSkipTimes{})
+			return []AnimeSkipTimes{}, nil
 		}
 
 		if resp.StatusCode != http.StatusOK {
@@ -174,14 +173,14 @@ func (c *AniSkipClient) GetSkipTimesForEpisode(malID, episodeNumber int) ([]type
 
 	// If no results found
 	if !skipResp.Found || len(skipResp.Results) == 0 {
-		c.saveToCache(malID, episodeNumber, []types.AnimeSkipTimes{})
-		return []types.AnimeSkipTimes{}, nil
+		c.saveToCache(malID, episodeNumber, []AnimeSkipTimes{})
+		return []AnimeSkipTimes{}, nil
 	}
 
 	// Convert to our skip times format
-	var skipTimes []types.AnimeSkipTimes
+	var skipTimes []AnimeSkipTimes
 	for _, result := range skipResp.Results {
-		skipTime := types.AnimeSkipTimes{
+		skipTime := AnimeSkipTimes{
 			SkipType:      result.SkipType,
 			StartTime:     result.Interval.StartTime,
 			EndTime:       result.Interval.EndTime,
@@ -197,10 +196,10 @@ func (c *AniSkipClient) GetSkipTimesForEpisode(malID, episodeNumber int) ([]type
 }
 
 // GetSkipTimesForEpisodesBatch fetches skip times for episodes in batches
-func (c *AniSkipClient) GetSkipTimesForEpisodesBatch(malID int, episodes []int) (map[int][]types.AnimeSkipTimes, error) {
+func (c *AniSkipClient) GetSkipTimesForEpisodesBatch(malID int, episodes []int) (map[int][]AnimeSkipTimes, error) {
 	// If we have fewer than 3 episodes, use individual requests instead
 	if len(episodes) < 3 {
-		results := make(map[int][]types.AnimeSkipTimes)
+		results := make(map[int][]AnimeSkipTimes)
 		for _, ep := range episodes {
 			skipTimes, err := c.GetSkipTimesForEpisode(malID, ep)
 			if err != nil {
@@ -213,7 +212,7 @@ func (c *AniSkipClient) GetSkipTimesForEpisodesBatch(malID int, episodes []int) 
 
 	// Check if all episodes are cached and return them
 	allCached := true
-	cachedResults := make(map[int][]types.AnimeSkipTimes)
+	cachedResults := make(map[int][]AnimeSkipTimes)
 
 	for _, ep := range episodes {
 		if skipTimes, found := c.getFromCache(malID, ep); found {
@@ -318,7 +317,7 @@ func (c *AniSkipClient) GetSkipTimesForEpisodesBatch(malID int, episodes []int) 
 		return nil, fmt.Errorf("failed to decode batch response: %w", err)
 	}
 
-	results := make(map[int][]types.AnimeSkipTimes)
+	results := make(map[int][]AnimeSkipTimes)
 
 	// Process results
 	for epStr, epData := range skipResp {
@@ -327,11 +326,11 @@ func (c *AniSkipClient) GetSkipTimesForEpisodesBatch(malID int, episodes []int) 
 			continue // Skip if we can't parse the episode number
 		}
 
-		var skipTimes []types.AnimeSkipTimes
+		var skipTimes []AnimeSkipTimes
 
 		if epData.Found {
 			for _, result := range epData.Results {
-				skipTimes = append(skipTimes, types.AnimeSkipTimes{
+				skipTimes = append(skipTimes, AnimeSkipTimes{
 					SkipType:      result.SkipType,
 					StartTime:     result.Interval.StartTime,
 					EndTime:       result.Interval.EndTime,
@@ -349,16 +348,16 @@ func (c *AniSkipClient) GetSkipTimesForEpisodesBatch(malID int, episodes []int) 
 }
 
 // GetSkipTimesForEpisodes fetches skip times for multiple episodes efficiently
-func (c *AniSkipClient) GetSkipTimesForEpisodes(malID int, episodeCount int, maxConcurrent int) []types.EpisodeSkipResult {
+func (c *AniSkipClient) GetSkipTimesForEpisodes(malID int, episodeCount int, maxConcurrent int) []EpisodeSkipResult {
 	startTime := time.Now()
 
 	// If episode count is small, just use single endpoint
 	if episodeCount <= 5 {
-		results := []types.EpisodeSkipResult{}
+		results := []EpisodeSkipResult{}
 		for i := 1; i <= episodeCount; i++ {
 			skipTimes, err := c.GetSkipTimesForEpisode(malID, i)
 			if err == nil && len(skipTimes) > 0 {
-				results = append(results, types.EpisodeSkipResult{
+				results = append(results, EpisodeSkipResult{
 					EpisodeNumber: i,
 					SkipTimes:     skipTimes,
 				})
@@ -375,7 +374,7 @@ func (c *AniSkipClient) GetSkipTimesForEpisodes(malID int, episodeCount int, max
 
 	// Batch size - we'll process episodes in batches
 	const batchSize = 25
-	var results []types.EpisodeSkipResult
+	var results []EpisodeSkipResult
 
 	// Process in batches
 	for i := 0; i < episodeCount; i += batchSize {
@@ -387,8 +386,8 @@ func (c *AniSkipClient) GetSkipTimesForEpisodes(malID int, episodeCount int, max
 		batchEpisodes := allEpisodes[i:end]
 		batchResults, err := c.GetSkipTimesForEpisodesBatch(malID, batchEpisodes)
 		if err != nil {
-			logger.Log(fmt.Sprintf("Error fetching skip times batch %d-%d: %v", i+1, end, err), types.LogOptions{
-				Level:  types.Warn,
+			logger.Log(fmt.Sprintf("Error fetching skip times batch %d-%d: %v", i+1, end, err), logger.LogOptions{
+				Level:  logger.Warn,
 				Prefix: "AniSkip",
 			})
 			continue
@@ -397,7 +396,7 @@ func (c *AniSkipClient) GetSkipTimesForEpisodes(malID int, episodeCount int, max
 		// Add results to the final list
 		for epNum, skipTimes := range batchResults {
 			if len(skipTimes) > 0 {
-				results = append(results, types.EpisodeSkipResult{
+				results = append(results, EpisodeSkipResult{
 					EpisodeNumber: epNum,
 					SkipTimes:     skipTimes,
 				})
@@ -406,8 +405,8 @@ func (c *AniSkipClient) GetSkipTimesForEpisodes(malID int, episodeCount int, max
 	}
 
 	logger.Log(fmt.Sprintf("AniSkip: Fetched skip times for %d episodes of %d in %s",
-		len(results), episodeCount, time.Since(startTime)), types.LogOptions{
-		Level:  types.Debug,
+		len(results), episodeCount, time.Since(startTime)), logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "AniSkip",
 	})
 

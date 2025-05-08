@@ -3,7 +3,6 @@ package database
 import (
 	"context"
 	"fmt"
-	"metachan/types"
 	"metachan/utils/logger"
 	"time"
 )
@@ -15,9 +14,9 @@ func DatabaseConnectionStatus() bool {
 
 	sqlDB, err := DB.DB()
 	if err != nil {
-		logger.Log(fmt.Sprintf("Unable to get SQL DB: %v", err), types.LogOptions{
+		logger.Log(fmt.Sprintf("Unable to get SQL DB: %v", err), logger.LogOptions{
 			Prefix: "Database",
-			Level:  types.Error,
+			Level:  logger.Error,
 		})
 		return false
 	}
@@ -27,9 +26,9 @@ func DatabaseConnectionStatus() bool {
 
 	err = sqlDB.PingContext(ctx)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Database connection error: %v", err), types.LogOptions{
+		logger.Log(fmt.Sprintf("Database connection error: %v", err), logger.LogOptions{
 			Prefix: "Database",
-			Level:  types.Error,
+			Level:  logger.Error,
 		})
 		return false
 	}

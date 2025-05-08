@@ -4,14 +4,13 @@ import (
 	"fmt"
 	"metachan/database"
 	"metachan/entities"
-	"metachan/types"
 	"metachan/utils/logger"
 )
 
 // FindSeasonMappings finds all anime mappings that belong to the same series based on TVDB ID
 func FindSeasonMappings(tvdbID int) ([]entities.AnimeMapping, error) {
-	logger.Log(fmt.Sprintf("Finding season mappings for TVDB ID %d", tvdbID), types.LogOptions{
-		Level:  types.Debug,
+	logger.Log(fmt.Sprintf("Finding season mappings for TVDB ID %d", tvdbID), logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "TVDB",
 	})
 
@@ -22,13 +21,13 @@ func FindSeasonMappings(tvdbID int) ([]entities.AnimeMapping, error) {
 	}
 
 	if len(mappings) == 0 {
-		logger.Log(fmt.Sprintf("No season mappings found for TVDB ID %d", tvdbID), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("No season mappings found for TVDB ID %d", tvdbID), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "TVDB",
 		})
 	} else {
-		logger.Log(fmt.Sprintf("Found %d season mappings for TVDB ID %d", len(mappings), tvdbID), types.LogOptions{
-			Level:  types.Info,
+		logger.Log(fmt.Sprintf("Found %d season mappings for TVDB ID %d", len(mappings), tvdbID), logger.LogOptions{
+			Level:  logger.Info,
 			Prefix: "TVDB",
 		})
 	}

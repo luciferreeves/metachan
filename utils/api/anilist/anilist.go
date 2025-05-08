@@ -1,10 +1,9 @@
-package api
+package anilist
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"metachan/types"
 	"metachan/utils/logger"
 	"net/http"
 )
@@ -24,7 +23,7 @@ func NewAniListClient() *AniListClient {
 }
 
 // GetAnime fetches anime details from AniList by ID using a simpler approach
-func (c *AniListClient) GetAnime(anilistID int) (*types.AnilistAnimeResponse, error) {
+func (c *AniListClient) GetAnime(anilistID int) (*AnilistAnimeResponse, error) {
 	// Create a much simpler request with minimal formatting that might trigger Cloudflare
 	query := `
 	query ($id: Int) {
@@ -92,8 +91,8 @@ func (c *AniListClient) GetAnime(anilistID int) (*types.AnilistAnimeResponse, er
 	}
 
 	// Log the request for debugging
-	logger.Log(fmt.Sprintf("Sending request to AniList for ID %d", anilistID), types.LogOptions{
-		Level:  types.Debug,
+	logger.Log(fmt.Sprintf("Sending request to AniList for ID %d", anilistID), logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "AniList",
 	})
 
@@ -116,8 +115,8 @@ func (c *AniListClient) GetAnime(anilistID int) (*types.AnilistAnimeResponse, er
 		resp, err = c.client.Do(req)
 		if err != nil {
 			lastErr = err
-			logger.Log(fmt.Sprintf("AniList request attempt %d failed: %v", i+1, err), types.LogOptions{
-				Level:  types.Debug,
+			logger.Log(fmt.Sprintf("AniList request attempt %d failed: %v", i+1, err), logger.LogOptions{
+				Level:  logger.Debug,
 				Prefix: "AniList",
 			})
 			continue
@@ -129,14 +128,14 @@ func (c *AniListClient) GetAnime(anilistID int) (*types.AnilistAnimeResponse, er
 			body := make([]byte, 1024)
 			n, _ := resp.Body.Read(body)
 			lastErr = fmt.Errorf("server returned %d: %s", resp.StatusCode, string(body[:n]))
-			logger.Log(fmt.Sprintf("AniList returned non-200 status on attempt %d: %v", i+1, lastErr), types.LogOptions{
-				Level:  types.Debug,
+			logger.Log(fmt.Sprintf("AniList returned non-200 status on attempt %d: %v", i+1, lastErr), logger.LogOptions{
+				Level:  logger.Debug,
 				Prefix: "AniList",
 			})
 			continue
 		}
 
-		var anilistResponse types.AnilistAnimeResponse
+		var anilistResponse AnilistAnimeResponse
 		if err := json.NewDecoder(resp.Body).Decode(&anilistResponse); err != nil {
 			lastErr = fmt.Errorf("failed to decode response: %w", err)
 			continue
@@ -151,8 +150,8 @@ func (c *AniListClient) GetAnime(anilistID int) (*types.AnilistAnimeResponse, er
 		if anilistResponse.Data.Media.CoverImage.ExtraLarge != "" {
 			logger.Log(fmt.Sprintf("Found cover data - Color: %s, Image: %s",
 				anilistResponse.Data.Media.CoverImage.Color,
-				anilistResponse.Data.Media.CoverImage.ExtraLarge), types.LogOptions{
-				Level:  types.Debug,
+				anilistResponse.Data.Media.CoverImage.ExtraLarge), logger.LogOptions{
+				Level:  logger.Debug,
 				Prefix: "AniList",
 			})
 		}

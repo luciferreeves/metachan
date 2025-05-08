@@ -1,4 +1,4 @@
-package types
+package tmdb
 
 // TMDBShowResult represents a TV show result from TMDB search
 type TMDBShowResult struct {

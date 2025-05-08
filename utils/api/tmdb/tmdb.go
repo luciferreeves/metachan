@@ -1,4 +1,4 @@
-package api
+package tmdb
 
 import (
 	"encoding/json"
@@ -31,8 +31,8 @@ func makeRequestWithRetries(req *http.Request, maxRetries int) (*http.Response, 
 			sleepTime := backoffTime + jitter
 
 			logger.Log(fmt.Sprintf("TMDB request retry %d/%d after %v due to: %v",
-				attempt, maxRetries, sleepTime, lastErr), types.LogOptions{
-				Level:  types.Debug,
+				attempt, maxRetries, sleepTime, lastErr), logger.LogOptions{
+				Level:  logger.Debug,
 				Prefix: "TMDB",
 			})
 
@@ -120,7 +120,7 @@ func normalizeTitle(title string) string {
 }
 
 // searchTVShowsByTitle searches for TV shows on TMDB by title
-func searchTVShowsByTitle(title string, alternativeTitle string, isAdult bool, countryPriority string) ([]types.TMDBShowResult, error) {
+func searchTVShowsByTitle(title string, alternativeTitle string, isAdult bool, countryPriority string) ([]TMDBShowResult, error) {
 	if config.Config.TMDB.ReadAccessToken == "" {
 		return nil, fmt.Errorf("TMDB is not initialized")
 	}
@@ -131,8 +131,8 @@ func searchTVShowsByTitle(title string, alternativeTitle string, isAdult bool, c
 		query = normalizeTitle(alternativeTitle)
 	}
 
-	logger.Log(fmt.Sprintf("Searching TMDB for TV show: %s", query), types.LogOptions{
-		Level:  types.Debug,
+	logger.Log(fmt.Sprintf("Searching TMDB for TV show: %s", query), logger.LogOptions{
+		Level:  logger.Debug,
 		Prefix: "TMDB",
 	})
 
@@ -163,7 +163,7 @@ func searchTVShowsByTitle(title string, alternativeTitle string, isAdult bool, c
 	}
 
 	// Parse response
-	var searchResponse types.TMDBSearchResponse
+	var searchResponse TMDBSearchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&searchResponse); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
@@ -171,7 +171,7 @@ func searchTVShowsByTitle(title string, alternativeTitle string, isAdult bool, c
 	results := searchResponse.Results
 
 	// Filter results if needed
-	var filteredResults []types.TMDBShowResult
+	var filteredResults []TMDBShowResult
 	for _, show := range results {
 		if (isAdult && show.Adult) || (!isAdult && !show.Adult) {
 			filteredResults = append(filteredResults, show)
@@ -180,8 +180,8 @@ func searchTVShowsByTitle(title string, alternativeTitle string, isAdult bool, c
 
 	// Sort by country priority if specified
 	if countryPriority != "" && len(filteredResults) > 0 {
-		var prioritizedResults []types.TMDBShowResult
-		var otherResults []types.TMDBShowResult
+		var prioritizedResults []TMDBShowResult
+		var otherResults []TMDBShowResult
 
 		for _, show := range filteredResults {
 			hasPriority := false
@@ -204,13 +204,13 @@ func searchTVShowsByTitle(title string, alternativeTitle string, isAdult bool, c
 	}
 
 	if len(filteredResults) == 0 {
-		logger.Log(fmt.Sprintf("No TMDB shows found for: %s", query), types.LogOptions{
-			Level:  types.Warn,
+		logger.Log(fmt.Sprintf("No TMDB shows found for: %s", query), logger.LogOptions{
+			Level:  logger.Warn,
 			Prefix: "TMDB",
 		})
 	} else {
-		logger.Log(fmt.Sprintf("Found %d TMDB shows for: %s", len(filteredResults), query), types.LogOptions{
-			Level:  types.Debug,
+		logger.Log(fmt.Sprintf("Found %d TMDB shows for: %s", len(filteredResults), query), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "TMDB",
 		})
 	}
@@ -219,7 +219,7 @@ func searchTVShowsByTitle(title string, alternativeTitle string, isAdult bool, c
 }
 
 // getTVShowDetails gets details for a TV show from TMDB
-func getTVShowDetails(showID int) (*types.TMDBShowDetails, error) {
+func getTVShowDetails(showID int) (*TMDBShowDetails, error) {
 	if config.Config.TMDB.ReadAccessToken == "" {
 		return nil, fmt.Errorf("TMDB is not initialized")
 	}
@@ -246,7 +246,7 @@ func getTVShowDetails(showID int) (*types.TMDBShowDetails, error) {
 	}
 
 	// Parse response
-	var showDetails types.TMDBShowDetails
+	var showDetails TMDBShowDetails
 	if err := json.NewDecoder(resp.Body).Decode(&showDetails); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
@@ -255,7 +255,7 @@ func getTVShowDetails(showID int) (*types.TMDBShowDetails, error) {
 }
 
 // getSeasonDetails gets details for a TV season from TMDB
-func getSeasonDetails(showID, seasonNumber int) (*types.TMDBSeasonDetails, error) {
+func getSeasonDetails(showID, seasonNumber int) (*TMDBSeasonDetails, error) {
 	if config.Config.TMDB.ReadAccessToken == "" {
 		return nil, fmt.Errorf("TMDB is not initialized")
 	}
@@ -282,7 +282,7 @@ func getSeasonDetails(showID, seasonNumber int) (*types.TMDBSeasonDetails, error
 	}
 
 	// Parse response
-	var seasonDetails types.TMDBSeasonDetails
+	var seasonDetails TMDBSeasonDetails
 	if err := json.NewDecoder(resp.Body).Decode(&seasonDetails); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
@@ -291,12 +291,12 @@ func getSeasonDetails(showID, seasonNumber int) (*types.TMDBSeasonDetails, error
 }
 
 // findBestSeason finds the best matching season for an anime
-func findBestSeason(shows []types.TMDBShowResult, title string, episodeCount int, airDate string) (int, int, error) {
+func findBestSeason(shows []TMDBShowResult, title string, episodeCount int, airDate string) (int, int, error) {
 	for _, show := range shows {
 		showDetails, err := getTVShowDetails(show.ID)
 		if err != nil {
-			logger.Log(fmt.Sprintf("Failed to get details for show %d: %v", show.ID, err), types.LogOptions{
-				Level:  types.Warn,
+			logger.Log(fmt.Sprintf("Failed to get details for show %d: %v", show.ID, err), logger.LogOptions{
+				Level:  logger.Warn,
 				Prefix: "TMDB",
 			})
 			continue
@@ -325,8 +325,8 @@ func findBestSeason(shows []types.TMDBShowResult, title string, episodeCount int
 			// If either count or air date matches, consider it a potential match
 			if episodeCountMatches || airDateMatches {
 				logger.Log(fmt.Sprintf("Found matching season for \"%s\": Show ID %d, Season %d",
-					title, show.ID, season.SeasonNumber), types.LogOptions{
-					Level:  types.Info,
+					title, show.ID, season.SeasonNumber), logger.LogOptions{
+					Level:  logger.Info,
 					Prefix: "TMDB",
 				})
 				return show.ID, season.SeasonNumber, nil
@@ -340,8 +340,8 @@ func findBestSeason(shows []types.TMDBShowResult, title string, episodeCount int
 // AttachEpisodeDescriptions enriches anime episodes with descriptions and thumbnails from TMDB
 func AttachEpisodeDescriptions(title string, episodes []types.AnimeSingleEpisode, alternativeTitle string, tmdbID int) []types.AnimeSingleEpisode {
 	if config.Config.TMDB.ReadAccessToken == "" {
-		logger.Log("TMDB is not configured, skipping episode description enrichment", types.LogOptions{
-			Level:  types.Warn,
+		logger.Log("TMDB is not configured, skipping episode description enrichment", logger.LogOptions{
+			Level:  logger.Warn,
 			Prefix: "TMDB",
 		})
 		return episodes
@@ -351,8 +351,8 @@ func AttachEpisodeDescriptions(title string, episodes []types.AnimeSingleEpisode
 		return episodes
 	}
 
-	logger.Log(fmt.Sprintf("Enriching episodes for: %s", title), types.LogOptions{
-		Level:  types.Info,
+	logger.Log(fmt.Sprintf("Enriching episodes for: %s", title), logger.LogOptions{
+		Level:  logger.Info,
 		Prefix: "TMDB",
 	})
 
@@ -367,8 +367,8 @@ func AttachEpisodeDescriptions(title string, episodes []types.AnimeSingleEpisode
 		// Try to get show details and find the best season
 		showDetails, err := getTVShowDetails(showID)
 		if err != nil {
-			logger.Log(fmt.Sprintf("Failed to get TMDB show details for ID %d: %v", tmdbID, err), types.LogOptions{
-				Level:  types.Warn,
+			logger.Log(fmt.Sprintf("Failed to get TMDB show details for ID %d: %v", tmdbID, err), logger.LogOptions{
+				Level:  logger.Warn,
 				Prefix: "TMDB",
 			})
 			return episodes
@@ -405,24 +405,24 @@ func AttachEpisodeDescriptions(title string, episodes []types.AnimeSingleEpisode
 			}
 		}
 
-		logger.Log(fmt.Sprintf("Using TMDB ID %d with season %d", showID, seasonNumber), types.LogOptions{
-			Level:  types.Info,
+		logger.Log(fmt.Sprintf("Using TMDB ID %d with season %d", showID, seasonNumber), logger.LogOptions{
+			Level:  logger.Info,
 			Prefix: "TMDB",
 		})
 	} else {
 		// Search for the TV show on TMDB if we don't have a direct ID
 		shows, err := searchTVShowsByTitle(title, alternativeTitle, false, "JP")
 		if err != nil {
-			logger.Log(fmt.Sprintf("Failed to search TV shows: %v", err), types.LogOptions{
-				Level:  types.Warn,
+			logger.Log(fmt.Sprintf("Failed to search TV shows: %v", err), logger.LogOptions{
+				Level:  logger.Warn,
 				Prefix: "TMDB",
 			})
 			return episodes
 		}
 
 		if len(shows) == 0 {
-			logger.Log(fmt.Sprintf("No TV shows found for: %s", title), types.LogOptions{
-				Level:  types.Warn,
+			logger.Log(fmt.Sprintf("No TV shows found for: %s", title), logger.LogOptions{
+				Level:  logger.Warn,
 				Prefix: "TMDB",
 			})
 			return episodes
@@ -436,8 +436,8 @@ func AttachEpisodeDescriptions(title string, episodes []types.AnimeSingleEpisode
 
 		showID, seasonNumber, err = findBestSeason(shows, title, len(episodes), airDate)
 		if err != nil {
-			logger.Log(fmt.Sprintf("Failed to find best season: %v", err), types.LogOptions{
-				Level:  types.Warn,
+			logger.Log(fmt.Sprintf("Failed to find best season: %v", err), logger.LogOptions{
+				Level:  logger.Warn,
 				Prefix: "TMDB",
 			})
 			return episodes
@@ -447,8 +447,8 @@ func AttachEpisodeDescriptions(title string, episodes []types.AnimeSingleEpisode
 	// Get season details with episode information
 	seasonDetails, err := getSeasonDetails(showID, seasonNumber)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Failed to get season details: %v", err), types.LogOptions{
-			Level:  types.Warn,
+		logger.Log(fmt.Sprintf("Failed to get season details: %v", err), logger.LogOptions{
+			Level:  logger.Warn,
 			Prefix: "TMDB",
 		})
 		return episodes
@@ -489,8 +489,8 @@ func AttachEpisodeDescriptions(title string, episodes []types.AnimeSingleEpisode
 	}
 
 	logger.Log(fmt.Sprintf("Successfully enriched %d episodes with descriptions and %d with thumbnails for: %s",
-		len(enrichedEpisodes), thumbnailCount, title), types.LogOptions{
-		Level:  types.Success,
+		len(enrichedEpisodes), thumbnailCount, title), logger.LogOptions{
+		Level:  logger.Success,
 		Prefix: "TMDB",
 	})
 

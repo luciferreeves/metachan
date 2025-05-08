@@ -17,15 +17,15 @@ import (
 const fribbURL = "https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json"
 
 func AniSync() error {
-	logger.Log("Starting Anime Sync", types.LogOptions{
-		Level:  types.Info,
+	logger.Log("Starting Anime Sync", logger.LogOptions{
+		Level:  logger.Info,
 		Prefix: "AniSync",
 	})
 
 	response, err := http.Get(fribbURL)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Anime Sync failed: %v", err), types.LogOptions{
-			Level:  types.Error,
+		logger.Log(fmt.Sprintf("Anime Sync failed: %v", err), logger.LogOptions{
+			Level:  logger.Error,
 			Prefix: "AniSync",
 		})
 		return err
@@ -34,8 +34,8 @@ func AniSync() error {
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Failed to read response body: %v", err), types.LogOptions{
-			Level:  types.Error,
+		logger.Log(fmt.Sprintf("Failed to read response body: %v", err), logger.LogOptions{
+			Level:  logger.Error,
 			Prefix: "AniSync",
 		})
 		return err
@@ -43,8 +43,8 @@ func AniSync() error {
 
 	var mappings []types.AniSyncMapping
 	if err := json.Unmarshal(body, &mappings); err != nil {
-		logger.Log(fmt.Sprintf("Failed to unmarshal JSON: %v", err), types.LogOptions{
-			Level:  types.Error,
+		logger.Log(fmt.Sprintf("Failed to unmarshal JSON: %v", err), logger.LogOptions{
+			Level:  logger.Error,
 			Prefix: "AniSync",
 		})
 		return err
@@ -61,14 +61,14 @@ func AniSync() error {
 
 		batch := mappings[i:end]
 		processBatch(batch)
-		logger.Log(fmt.Sprintf("Processed %d/%d mappings", end, total), types.LogOptions{
-			Level:  types.Info,
+		logger.Log(fmt.Sprintf("Processed %d/%d mappings", end, total), logger.LogOptions{
+			Level:  logger.Info,
 			Prefix: "AniSync",
 		})
 	}
 
-	logger.Log("Anime Sync completed", types.LogOptions{
-		Level:  types.Success,
+	logger.Log("Anime Sync completed", logger.LogOptions{
+		Level:  logger.Success,
 		Prefix: "AniSync",
 	})
 
@@ -104,14 +104,14 @@ func processBatch(mappings []types.AniSyncMapping) {
 					MALAnilistComposite: composite,
 				}
 				if err := database.DB.Create(&newEntity).Error; err != nil {
-					logger.Log(fmt.Sprintf("Unable to process mapping %v: %v", mapping, err), types.LogOptions{
-						Level:  types.Warn,
+					logger.Log(fmt.Sprintf("Unable to process mapping %v: %v", mapping, err), logger.LogOptions{
+						Level:  logger.Warn,
 						Prefix: "AniSync",
 					})
 				}
 			} else {
-				logger.Log(fmt.Sprintf("Error fetching entity: %v", err), types.LogOptions{
-					Level:  types.Error,
+				logger.Log(fmt.Sprintf("Error fetching entity: %v", err), logger.LogOptions{
+					Level:  logger.Error,
 					Prefix: "AniSync",
 				})
 			}
@@ -133,8 +133,8 @@ func processBatch(mappings []types.AniSyncMapping) {
 			entity.Type = entities.MappingType(mapping.Type)
 			entity.MALAnilistComposite = composite
 			if err := database.DB.Save(&entity).Error; err != nil {
-				logger.Log(fmt.Sprintf("Unable to update mapping %v: %v", mapping, err), types.LogOptions{
-					Level:  types.Warn,
+				logger.Log(fmt.Sprintf("Unable to update mapping %v: %v", mapping, err), logger.LogOptions{
+					Level:  logger.Warn,
 					Prefix: "AniSync",
 				})
 			}

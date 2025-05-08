@@ -3,7 +3,6 @@ package database
 import (
 	"fmt"
 	"metachan/entities"
-	"metachan/types"
 	"metachan/utils/logger"
 )
 
@@ -13,15 +12,15 @@ func AutoMigrate() {
 		&entities.AnimeMapping{},
 	)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Error during auto migration: %v", err), types.LogOptions{
+		logger.Log(fmt.Sprintf("Error during auto migration: %v", err), logger.LogOptions{
 			Prefix: "Database",
-			Level:  types.Error,
+			Level:  logger.Error,
 			Fatal:  true,
 		})
 	} else {
-		logger.Log("Auto migration completed successfully", types.LogOptions{
+		logger.Log("Auto migration completed successfully", logger.LogOptions{
 			Prefix: "Database",
-			Level:  types.Success,
+			Level:  logger.Success,
 		})
 	}
 }

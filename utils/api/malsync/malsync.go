@@ -1,11 +1,10 @@
-package api
+package malsync
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"metachan/types"
 	"net/http"
 	"time"
 )
@@ -31,7 +30,7 @@ func NewMALSyncClient() *MALSyncClient {
 }
 
 // GetAnimeByMALID fetches anime metadata from MALSync by MAL ID
-func (c *MALSyncClient) GetAnimeByMALID(malID int) (*types.MALSyncAnimeResponse, error) {
+func (c *MALSyncClient) GetAnimeByMALID(malID int) (*MALSyncAnimeResponse, error) {
 	apiURL := fmt.Sprintf("%s/anime/%d", malsyncAPIBaseURL, malID)
 
 	// Create context with timeout
@@ -85,7 +84,7 @@ func (c *MALSyncClient) GetAnimeByMALID(malID int) (*types.MALSyncAnimeResponse,
 		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
-	var malSyncResponse types.MALSyncAnimeResponse
+	var malSyncResponse MALSyncAnimeResponse
 	if err := json.Unmarshal(bodyBytes, &malSyncResponse); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}

@@ -29,9 +29,9 @@ func init() {
 	case types.SQLServer:
 		dialector = sqlserver.Open(config.Config.DataSourceName)
 	default:
-		logger.Log(fmt.Sprintf("Invalid database driver: %s", config.Config.DatabaseDriver), types.LogOptions{
+		logger.Log(fmt.Sprintf("Invalid database driver: %s", config.Config.DatabaseDriver), logger.LogOptions{
 			Prefix: "Database",
-			Level:  types.Error,
+			Level:  logger.Error,
 			Fatal:  true,
 		})
 	}
@@ -41,15 +41,15 @@ func init() {
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
 	})
 	if err != nil {
-		logger.Log(fmt.Sprintf("Error connecting to database: %v", err), types.LogOptions{
+		logger.Log(fmt.Sprintf("Error connecting to database: %v", err), logger.LogOptions{
 			Prefix: "Database",
-			Level:  types.Error,
+			Level:  logger.Error,
 			Fatal:  true,
 		})
 	} else {
-		logger.Log("Database connection established successfully", types.LogOptions{
+		logger.Log("Database connection established successfully", logger.LogOptions{
 			Prefix: "Database",
-			Level:  types.Success,
+			Level:  logger.Success,
 		})
 	}
 }
