@@ -2,6 +2,7 @@ package anime
 
 import (
 	"fmt"
+	"metachan/database"
 	"metachan/entities"
 	"metachan/types"
 	"metachan/utils/api/anilist"
@@ -44,6 +45,24 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 	}()
 
 	malID := mapping.MAL
+
+	// First, check if we have a valid cached version
+	cachedAnime, err := database.GetCachedAnimeByMALID(malID)
+	if err == nil && database.IsCacheValid(cachedAnime) {
+		logger.Log(fmt.Sprintf("Cache hit for anime (MAL ID: %d), returning cached data", malID), logger.LogOptions{
+			Level:  logger.Info,
+			Prefix: "AnimeCache",
+		})
+
+		// Convert the cached anime to the types.Anime format
+		return database.ConvertToTypesAnime(cachedAnime), nil
+	}
+
+	// Cache miss or expired, fetch from external APIs
+	logger.Log(fmt.Sprintf("Cache miss for anime (MAL ID: %d), fetching fresh data", malID), logger.LogOptions{
+		Level:  logger.Info,
+		Prefix: "AnimeAPI",
+	})
 
 	// Create the different types of functions for proper Go generic type inference
 	animeFunc := func() (*jikan.JikanAnimeResponse, error) {
@@ -143,12 +162,14 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 	episodeDataChan := make(chan []types.AnimeSingleEpisode, 1)
 	subbedCountChan := make(chan int, 1)
 	dubbedCountChan := make(chan int, 1)
+	tmdbErrorChan := make(chan error, 1)
 
 	episodeProcessingStartTime := time.Now()
 	go func() {
 		defer close(episodeDataChan)
 		defer close(subbedCountChan)
 		defer close(dubbedCountChan)
+		defer close(tmdbErrorChan)
 
 		basicEpisodes := generateBasicEpisodes(episodes.Data)
 		logger.Log(fmt.Sprintf("Generated basic episodes: %d", len(basicEpisodes)), logger.LogOptions{
@@ -163,7 +184,8 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 		})
 		enrichStart := time.Now()
 
-		enrichedEpisodes := AttachEpisodeDescriptions(anime.Data.Title, basicEpisodes, anime.Data.TitleEnglish, mapping.TMDB)
+		enrichedEpisodes, tmdbErr := AttachEpisodeDescriptions(anime.Data.Title, basicEpisodes, anime.Data.TitleEnglish, mapping.TMDB)
+		tmdbErrorChan <- tmdbErr
 
 		// Get subbed and dubbed episode counts in bulk with a single API call (much faster)
 		subCount, dubCount := 0, 0
@@ -259,6 +281,7 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 	episodeData := <-episodeDataChan
 	subbedCount := <-subbedCountChan
 	dubbedCount := <-dubbedCountChan
+	tmdbError := <-tmdbErrorChan
 	logger.Log(fmt.Sprintf("Episode data wait time: %s (total episode processing time: %s)",
 		time.Since(episodeWaitStartTime),
 		time.Since(episodeProcessingStartTime)), logger.LogOptions{
@@ -380,6 +403,28 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 		logger.Log("No valid AniList data available for covers and color", logger.LogOptions{
 			Level:  logger.Debug,
 			Prefix: "AnimeAPI",
+		})
+	}
+
+	// Save the anime to cache only if TMDB didn't fail
+	if tmdbError == nil {
+		go func() {
+			if err := database.SaveAnimeToCache(animeDetails); err != nil {
+				logger.Log(fmt.Sprintf("Failed to save anime to cache: %v", err), logger.LogOptions{
+					Level:  logger.Error,
+					Prefix: "AnimeCache",
+				})
+			} else {
+				logger.Log(fmt.Sprintf("Successfully saved anime (MAL ID: %d) to cache", malID), logger.LogOptions{
+					Level:  logger.Debug,
+					Prefix: "AnimeCache",
+				})
+			}
+		}()
+	} else {
+		logger.Log(fmt.Sprintf("Skipping anime cache due to TMDB error: %v", tmdbError), logger.LogOptions{
+			Level:  logger.Warn,
+			Prefix: "AnimeCache",
 		})
 	}
 
