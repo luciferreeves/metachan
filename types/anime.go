@@ -35,34 +35,49 @@ type AnimeSkipTimes struct {
 	EpisodeLength float64 `json:"episode_length"`
 }
 
+// EpisodeSkipResult contains skip times for a specific episode
+type EpisodeSkipResult struct {
+	EpisodeNumber int
+	SkipTimes     []AnimeSkipTimes
+}
+
+// EpisodeStreamingResult contains streaming sources for a specific episode
+// Used for parallel streaming source fetching
+type EpisodeStreamingResult struct {
+	EpisodeNumber int
+	Streaming     *AnimeStreaming
+}
+
 type AnimeStreamingSource struct {
 	URL    string `json:"url"`
 	Server string `json:"server"`
 	Type   string `json:"type"` // MP4 or M3U8
 }
 
+// AnimeStreaming represents streaming sources for an anime episode
 type AnimeStreaming struct {
-	SkipTimes []AnimeSkipTimes       `json:"skip_times"`
-	Sub       []AnimeStreamingSource `json:"sub"`
-	Dub       []AnimeStreamingSource `json:"dub"`
+	Sub []AnimeStreamingSource `json:"sub"`
+	Dub []AnimeStreamingSource `json:"dub"`
 }
 
 type AnimeSingleEpisode struct {
-	Titles       EpisodeTitles  `json:"titles"`
-	Description  string         `json:"description"`
-	Aired        string         `json:"aired"`
-	Score        float64        `json:"score"`
-	Filler       bool           `json:"filler"`
-	Recap        bool           `json:"recap"`
-	ForumURL     string         `json:"forum_url"`
-	URL          string         `json:"url"`
-	ThumbnailURL string         `json:"thumbnail_url"`
-	Stream       AnimeStreaming `json:"stream"`
+	Titles       EpisodeTitles `json:"titles"`
+	Description  string        `json:"description"`
+	Aired        string        `json:"aired"`
+	Score        float64       `json:"score"`
+	Filler       bool          `json:"filler"`
+	Recap        bool          `json:"recap"`
+	ForumURL     string        `json:"forum_url"`
+	URL          string        `json:"url"`
+	ThumbnailURL string        `json:"thumbnail_url"`
+	// Stream       AnimeStreaming `json:"stream"`
 }
 
 type AnimeEpisodes struct {
 	Total    int                  `json:"total"`
 	Aired    int                  `json:"aired"`
+	Subbed   int                  `json:"subbed"` // Count of subbed episodes
+	Dubbed   int                  `json:"dubbed"` // Count of dubbed episodes
 	Episodes []AnimeSingleEpisode `json:"episodes"`
 }
 
@@ -531,8 +546,8 @@ type AnilistAnimeResponse struct {
 					Episode         int `json:"episode"`
 					AiringAt        int `json:"airingAt"`
 					TimeUntilAiring int `json:"timeUntilAiring"`
-				}
-			} `json:"nodes"`
+				} `json:"nodes"`
+			} `json:"airingSchedule"`
 			Trends struct {
 				Nodes []struct {
 					Date       int `json:"date"`

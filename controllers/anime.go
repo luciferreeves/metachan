@@ -2,14 +2,26 @@ package controllers
 
 import (
 	"metachan/database"
+	animeService "metachan/services/anime"
 	"metachan/types"
-	"metachan/utils/anime"
 	"metachan/utils/logger"
 	"metachan/utils/mappers"
 
 	"github.com/gofiber/fiber/v2"
 )
 
+// animeServiceInstance is a singleton instance of the anime service
+var animeServiceInstance *animeService.Service
+
+// getAnimeService returns the anime service instance, creating it if necessary
+func getAnimeService() *animeService.Service {
+	if animeServiceInstance == nil {
+		animeServiceInstance = animeService.NewService()
+	}
+	return animeServiceInstance
+}
+
+// GetAnimeByMALID fetches anime details by MAL ID
 func GetAnimeByMALID(c *fiber.Ctx) error {
 	malID := c.Params("mal_id")
 	if malID == "" {
@@ -25,7 +37,8 @@ func GetAnimeByMALID(c *fiber.Ctx) error {
 		})
 	}
 
-	anime, err := anime.GetAnimeDetails(mapping)
+	service := getAnimeService()
+	anime, err := service.GetAnimeDetails(mapping)
 	if err != nil {
 		logger.Log("Failed to fetch anime details: "+err.Error(), types.LogOptions{
 			Level:  types.Error,

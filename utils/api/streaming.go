@@ -1,10 +1,9 @@
-package anime
+package api
 
 import (
 	"encoding/json"
 	"fmt"
 	"metachan/types"
-	"metachan/utils/logger"
 	"net/http"
 	"net/url"
 	"sort"
@@ -17,13 +16,13 @@ const (
 	allanimeBaseURL = "https://api.allanime.day/api"
 )
 
-// AllAnimeClient handles communication with the AllAnime API
+// AllAnimeClient provides methods for interacting with the AllAnime API
 type AllAnimeClient struct {
 	client  *http.Client
 	headers http.Header
 }
 
-// StreamingSearchResult represents an anime search result from AllAnime
+// StreamingSearchResult represents a search result from AllAnime
 type StreamingSearchResult struct {
 	ID          string  `json:"_id"`
 	Name        string  `json:"name"`
@@ -32,7 +31,7 @@ type StreamingSearchResult struct {
 	Similarity  float64 `json:"similarity"`
 }
 
-// NewAllAnimeClient creates a new client for accessing the AllAnime API
+// NewAllAnimeClient creates a new AllAnime client
 func NewAllAnimeClient() *AllAnimeClient {
 	headers := http.Header{
 		"User-Agent": {"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0"},
@@ -49,31 +48,38 @@ func NewAllAnimeClient() *AllAnimeClient {
 
 // calculateSimilarity determines how closely a title matches a query
 func (c *AllAnimeClient) calculateSimilarity(query, title string) float64 {
-	query = strings.ToLower(strings.TrimSpace(query))
-	title = strings.ToLower(strings.TrimSpace(title))
+	queryLower := strings.ToLower(query)
+	titleLower := strings.ToLower(title)
 
-	if query == title {
+	// Exact match
+	if queryLower == titleLower {
 		return 1.0
 	}
 
-	if strings.Contains(title, query) {
+	// Title contains query
+	if strings.Contains(titleLower, queryLower) {
 		return 0.9
 	}
 
-	matches := 0
-	queryRunes := []rune(query)
-	titleRunes := []rune(title)
+	// Calculate word match score
+	queryWords := strings.Fields(queryLower)
+	titleWords := strings.Fields(titleLower)
 
-	for i := 0; i < len(queryRunes); i++ {
-		for j := 0; j < len(titleRunes); j++ {
-			if queryRunes[i] == titleRunes[j] {
-				matches++
+	matchCount := 0
+	for _, qw := range queryWords {
+		for _, tw := range titleWords {
+			if qw == tw || strings.Contains(tw, qw) || strings.Contains(qw, tw) {
+				matchCount++
 				break
 			}
 		}
 	}
 
-	return float64(matches) / float64(len(query))
+	if len(queryWords) == 0 {
+		return 0
+	}
+
+	return float64(matchCount) / float64(len(queryWords))
 }
 
 // decodeURL decodes an encoded URL from AllAnime
@@ -212,8 +218,8 @@ func getServerName(sourceType string) string {
 	}
 }
 
-// searchAnime searches for anime by title on AllAnime
-func (c *AllAnimeClient) searchAnime(query string) ([]StreamingSearchResult, error) {
+// SearchAnime searches for anime by title on AllAnime
+func (c *AllAnimeClient) SearchAnime(query string) ([]StreamingSearchResult, error) {
 	searchQuery := `
 	query(
 		$search: SearchInput
@@ -274,12 +280,11 @@ func (c *AllAnimeClient) searchAnime(query string) ([]StreamingSearchResult, err
 	}
 
 	shows := data["data"].(map[string]interface{})["shows"].(map[string]interface{})["edges"].([]interface{})
-	results := make([]StreamingSearchResult, 0)
+	results := make([]StreamingSearchResult, 0, len(shows))
 
 	for _, show := range shows {
 		showMap := show.(map[string]interface{})
 		episodes := showMap["availableEpisodes"].(map[string]interface{})
-
 		result := StreamingSearchResult{
 			ID:          showMap["_id"].(string),
 			Name:        showMap["name"].(string),
@@ -290,6 +295,7 @@ func (c *AllAnimeClient) searchAnime(query string) ([]StreamingSearchResult, err
 		results = append(results, result)
 	}
 
+	// Sort by similarity
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Similarity > results[j].Similarity
 	})
@@ -297,8 +303,8 @@ func (c *AllAnimeClient) searchAnime(query string) ([]StreamingSearchResult, err
 	return results, nil
 }
 
-// getEpisodesList gets the list of available episodes for an anime
-func (c *AllAnimeClient) getEpisodesList(showID string, mode string) ([]string, error) {
+// GetEpisodesList gets the list of available episodes for an anime
+func (c *AllAnimeClient) GetEpisodesList(showID string, mode string) ([]string, error) {
 	episodesQuery := `
 	query ($showId: String!) {
 		show(
@@ -364,8 +370,8 @@ func (c *AllAnimeClient) getEpisodesList(showID string, mode string) ([]string, 
 	return result, nil
 }
 
-// getEpisodeLinks gets streaming links for a specific episode
-func (c *AllAnimeClient) getEpisodeLinks(showID, episode, mode string) ([]types.AnimeStreamingSource, error) {
+// GetEpisodeLinks gets streaming links for a specific episode
+func (c *AllAnimeClient) GetEpisodeLinks(showID, episode, mode string) ([]types.AnimeStreamingSource, error) {
 	episodeQuery := `
 	query ($showId: String!, $translationType: VaildTranslationTypeEnumType!, $episodeString: String!) {
 		episode(
@@ -420,7 +426,7 @@ func (c *AllAnimeClient) getEpisodeLinks(showID, episode, mode string) ([]types.
 			sourceName := sourceMap["sourceName"].(string)
 			sourceInfo := c.processSourceURL(sourceURL, sourceName)
 
-			// Only add direct sources, matching the BubbleTea implementation
+			// Only add direct sources
 			if sourceInfo.Type == "direct" {
 				links = append(links, *sourceInfo)
 			}
@@ -431,16 +437,9 @@ func (c *AllAnimeClient) getEpisodeLinks(showID, episode, mode string) ([]types.
 }
 
 // GetStreamingSources fetches both sub and dub streaming sources for an anime episode
-func GetStreamingSources(title string, episodeNumber int) (*types.AnimeStreaming, error) {
-	client := NewAllAnimeClient()
-
-	logger.Log(fmt.Sprintf("Searching for streaming sources for '%s' episode %d", title, episodeNumber), types.LogOptions{
-		Level:  types.Info,
-		Prefix: "Streaming",
-	})
-
+func (c *AllAnimeClient) GetStreamingSources(title string, episodeNumber int) (*types.AnimeStreaming, error) {
 	// Search for the anime
-	searchResults, err := client.searchAnime(title)
+	searchResults, err := c.SearchAnime(title)
 	if err != nil {
 		return nil, fmt.Errorf("failed to search for anime: %w", err)
 	}
@@ -451,26 +450,20 @@ func GetStreamingSources(title string, episodeNumber int) (*types.AnimeStreaming
 
 	// Use the best match (first result)
 	bestMatch := searchResults[0]
-	logger.Log(fmt.Sprintf("Found anime '%s' with similarity %.2f", bestMatch.Name, bestMatch.Similarity), types.LogOptions{
-		Level:  types.Debug,
-		Prefix: "Streaming",
-	})
 
 	streaming := &types.AnimeStreaming{
-		SkipTimes: []types.AnimeSkipTimes{},
-		Sub:       []types.AnimeStreamingSource{},
-		Dub:       []types.AnimeStreamingSource{},
+		Sub: []types.AnimeStreamingSource{},
+		Dub: []types.AnimeStreamingSource{},
 	}
-
-	// Convert episode number to string
-	episodeStr := strconv.Itoa(episodeNumber)
 
 	// Get sub episodes if available
 	if bestMatch.SubEpisodes > 0 {
-		episodes, err := client.getEpisodesList(bestMatch.ID, "sub")
+		episodes, err := c.GetEpisodesList(bestMatch.ID, "sub")
 		if err == nil && len(episodes) > 0 {
 			// Find the closest episode
+			episodeStr := fmt.Sprintf("%d", episodeNumber)
 			var closestEpisode string
+
 			for _, ep := range episodes {
 				if ep == episodeStr {
 					closestEpisode = ep
@@ -479,13 +472,9 @@ func GetStreamingSources(title string, episodeNumber int) (*types.AnimeStreaming
 			}
 
 			if closestEpisode != "" {
-				subSources, err := client.getEpisodeLinks(bestMatch.ID, closestEpisode, "sub")
+				subSources, err := c.GetEpisodeLinks(bestMatch.ID, closestEpisode, "sub")
 				if err == nil {
 					streaming.Sub = subSources
-					logger.Log(fmt.Sprintf("Found %d sub streaming sources for episode %s", len(subSources), closestEpisode), types.LogOptions{
-						Level:  types.Debug,
-						Prefix: "Streaming",
-					})
 				}
 			}
 		}
@@ -493,10 +482,12 @@ func GetStreamingSources(title string, episodeNumber int) (*types.AnimeStreaming
 
 	// Get dub episodes if available
 	if bestMatch.DubEpisodes > 0 {
-		episodes, err := client.getEpisodesList(bestMatch.ID, "dub")
+		episodes, err := c.GetEpisodesList(bestMatch.ID, "dub")
 		if err == nil && len(episodes) > 0 {
 			// Find the closest episode
+			episodeStr := fmt.Sprintf("%d", episodeNumber)
 			var closestEpisode string
+
 			for _, ep := range episodes {
 				if ep == episodeStr {
 					closestEpisode = ep
@@ -505,28 +496,31 @@ func GetStreamingSources(title string, episodeNumber int) (*types.AnimeStreaming
 			}
 
 			if closestEpisode != "" {
-				dubSources, err := client.getEpisodeLinks(bestMatch.ID, closestEpisode, "dub")
+				dubSources, err := c.GetEpisodeLinks(bestMatch.ID, closestEpisode, "dub")
 				if err == nil {
 					streaming.Dub = dubSources
-					logger.Log(fmt.Sprintf("Found %d dub streaming sources for episode %s", len(dubSources), closestEpisode), types.LogOptions{
-						Level:  types.Debug,
-						Prefix: "Streaming",
-					})
 				}
 			}
 		}
 	}
 
-	// Check if we found any sources
-	if len(streaming.Sub) == 0 && len(streaming.Dub) == 0 {
-		return nil, fmt.Errorf("no streaming sources found for '%s' episode %d", title, episodeNumber)
+	return streaming, nil
+}
+
+// GetStreamingCounts fetches the total count of subbed and dubbed episodes for an anime without fetching individual episode data
+func (c *AllAnimeClient) GetStreamingCounts(title string) (int, int, error) {
+	// Search for the anime
+	searchResults, err := c.SearchAnime(title)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to search for anime: %w", err)
 	}
 
-	logger.Log(fmt.Sprintf("Successfully retrieved streaming sources for '%s' episode %d: %d sub, %d dub",
-		title, episodeNumber, len(streaming.Sub), len(streaming.Dub)), types.LogOptions{
-		Level:  types.Success,
-		Prefix: "Streaming",
-	})
+	if len(searchResults) == 0 {
+		return 0, 0, fmt.Errorf("no results found for '%s'", title)
+	}
 
-	return streaming, nil
+	// Use the best match (first result)
+	bestMatch := searchResults[0]
+
+	return bestMatch.SubEpisodes, bestMatch.DubEpisodes, nil
 }
