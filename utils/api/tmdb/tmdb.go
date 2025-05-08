@@ -12,6 +12,10 @@ import (
 	"time"
 )
 
+const (
+	MAX_RETRIES = 10
+)
+
 // makeSimpleRequest executes a simple HTTP request with retries for both connection and rate limit errors
 func makeSimpleRequest(req *http.Request) (*http.Response, error) {
 	// Create a simple HTTP client with a short timeout
@@ -19,11 +23,12 @@ func makeSimpleRequest(req *http.Request) (*http.Response, error) {
 		Timeout: 5 * time.Second, // Reduced timeout for faster failure
 	}
 
-	// Do retries for up to 3 attempts
+	// Do retries for up to MAX_RETRIES attempts
 	var lastErr error
 	var resp *http.Response
 
-	for attempt := 0; attempt < 3; attempt++ {
+	for attempt := 0; attempt < MAX_RETRIES; attempt++ {
+		// Log the attempt
 		// Execute the request
 		resp, lastErr = client.Do(req)
 
@@ -33,7 +38,7 @@ func makeSimpleRequest(req *http.Request) (*http.Response, error) {
 			if resp.StatusCode == http.StatusTooManyRequests {
 				resp.Body.Close()
 
-				logger.Log(fmt.Sprintf("TMDB rate limited (attempt %d/3): waiting 5 seconds", attempt+1), logger.LogOptions{
+				logger.Log(fmt.Sprintf("TMDB rate limited (attempt %d/%d): waiting 5 seconds", attempt+1, MAX_RETRIES), logger.LogOptions{
 					Level:  logger.Warn,
 					Prefix: "TMDB",
 				})
@@ -49,7 +54,7 @@ func makeSimpleRequest(req *http.Request) (*http.Response, error) {
 
 		// Check if this is a connection reset error for immediate retry
 		if strings.Contains(lastErr.Error(), "connection reset") {
-			logger.Log(fmt.Sprintf("TMDB connection reset (attempt %d/3): retrying immediately", attempt+1), logger.LogOptions{
+			logger.Log(fmt.Sprintf("TMDB connection reset (attempt %d/%d): retrying immediately", attempt+1, MAX_RETRIES), logger.LogOptions{
 				Level:  logger.Debug,
 				Prefix: "TMDB",
 			})
@@ -57,14 +62,14 @@ func makeSimpleRequest(req *http.Request) (*http.Response, error) {
 		}
 
 		// Log the error
-		logger.Log(fmt.Sprintf("TMDB request error (attempt %d/3): %v", attempt+1, lastErr), logger.LogOptions{
+		logger.Log(fmt.Sprintf("TMDB request error (attempt %d/%d): %v", attempt+1, MAX_RETRIES, lastErr), logger.LogOptions{
 			Level:  logger.Debug,
 			Prefix: "TMDB",
 		})
 	}
 
 	// All attempts failed, return the last error
-	return nil, fmt.Errorf("failed after 3 retry attempts: %w", lastErr)
+	return nil, fmt.Errorf("failed after %d retry attempts: %w", MAX_RETRIES, lastErr)
 }
 
 // normalizeTitle cleans up the anime title for better matching with TMDB
