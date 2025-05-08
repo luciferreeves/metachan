@@ -306,9 +306,8 @@ func ConvertToTypesAnime(cachedAnime *entities.CachedAnime) *types.Anime {
 	// Fill in NextAiringEpisode
 	if cachedAnime.NextAiringEpisode != nil && cachedAnime.NextAiringEpisode.IsNext {
 		anime.NextAiringEpisode = types.AnimeAiringEpisode{
-			AiringAt:        cachedAnime.NextAiringEpisode.AiringAt,
-			TimeUntilAiring: cachedAnime.NextAiringEpisode.TimeUntilAiring,
-			Episode:         cachedAnime.NextAiringEpisode.Episode,
+			AiringAt: cachedAnime.NextAiringEpisode.AiringAt,
+			Episode:  cachedAnime.NextAiringEpisode.Episode,
 		}
 	}
 
@@ -317,9 +316,8 @@ func ConvertToTypesAnime(cachedAnime *entities.CachedAnime) *types.Anime {
 		anime.AiringSchedule = make([]types.AnimeAiringEpisode, len(cachedAnime.AiringSchedule))
 		for i, episode := range cachedAnime.AiringSchedule {
 			anime.AiringSchedule[i] = types.AnimeAiringEpisode{
-				AiringAt:        episode.AiringAt,
-				TimeUntilAiring: episode.TimeUntilAiring,
-				Episode:         episode.Episode,
+				AiringAt: episode.AiringAt,
+				Episode:  episode.Episode,
 			}
 		}
 	}
@@ -597,13 +595,12 @@ func convertToCachedAnime(animeData *types.Anime) *entities.CachedAnime {
 		}
 	}
 
-	// Add NextAiringEpisode if available
-	if animeData.NextAiringEpisode.Episode > 0 {
+	// Add NextAiringEpisode
+	if animeData.NextAiringEpisode.AiringAt != 0 {
 		cachedAnime.NextAiringEpisode = &entities.CachedAiringEpisode{
-			AiringAt:        animeData.NextAiringEpisode.AiringAt,
-			TimeUntilAiring: animeData.NextAiringEpisode.TimeUntilAiring,
-			Episode:         animeData.NextAiringEpisode.Episode,
-			IsNext:          true,
+			AiringAt: animeData.NextAiringEpisode.AiringAt,
+			Episode:  animeData.NextAiringEpisode.Episode,
+			IsNext:   true,
 		}
 	}
 
@@ -612,10 +609,9 @@ func convertToCachedAnime(animeData *types.Anime) *entities.CachedAnime {
 		cachedAnime.AiringSchedule = make([]entities.CachedAiringEpisode, len(animeData.AiringSchedule))
 		for i, episode := range animeData.AiringSchedule {
 			cachedAnime.AiringSchedule[i] = entities.CachedAiringEpisode{
-				AiringAt:        episode.AiringAt,
-				TimeUntilAiring: episode.TimeUntilAiring,
-				Episode:         episode.Episode,
-				IsNext:          false, // Only the dedicated next episode is marked true
+				AiringAt: episode.AiringAt,
+				Episode:  episode.Episode,
+				IsNext:   false, // Only the dedicated next episode is marked true
 			}
 		}
 	}

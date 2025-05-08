@@ -221,16 +221,15 @@ func getNextAiringEpisode(anilistAnime *anilist.AnilistAnimeResponse) types.Anim
 		return types.AnimeAiringEpisode{}
 	}
 
-	logger.Log(fmt.Sprintf("Found next airing episode %d at timestamp %d (in %d seconds)",
-		nextEpisode.Episode, nextEpisode.AiringAt, nextEpisode.TimeUntilAiring), logger.LogOptions{
+	logger.Log(fmt.Sprintf("Found next airing episode %d at timestamp %d",
+		nextEpisode.Episode, nextEpisode.AiringAt), logger.LogOptions{
 		Level:  logger.Debug,
 		Prefix: "AnimeAPI",
 	})
 
 	return types.AnimeAiringEpisode{
-		AiringAt:        nextEpisode.AiringAt,
-		TimeUntilAiring: nextEpisode.TimeUntilAiring,
-		Episode:         nextEpisode.Episode,
+		AiringAt: nextEpisode.AiringAt,
+		Episode:  nextEpisode.Episode,
 	}
 }
 
@@ -253,9 +252,8 @@ func getAnimeSchedule(anilistAnime *anilist.AnilistAnimeResponse) []types.AnimeA
 
 	for _, node := range anilistAnime.Data.Media.AiringSchedule.Nodes {
 		schedule = append(schedule, types.AnimeAiringEpisode{
-			AiringAt:        node.AiringAt,
-			TimeUntilAiring: node.TimeUntilAiring,
-			Episode:         node.Episode,
+			AiringAt: node.AiringAt,
+			Episode:  node.Episode,
 		})
 	}
 

@@ -130,9 +130,8 @@ type AiringStatus struct {
 
 // AnimeAiringEpisode contains information about a single upcoming episode
 type AnimeAiringEpisode struct {
-	AiringAt        int `json:"airing_at"`
-	TimeUntilAiring int `json:"time_until_airing"`
-	Episode         int `json:"episode"`
+	AiringAt int `json:"airing_at"`
+	Episode  int `json:"episode"`
 }
 
 // AnimeBroadcast contains broadcast schedule information

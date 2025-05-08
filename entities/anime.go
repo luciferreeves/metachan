@@ -187,11 +187,10 @@ type CachedAnimeLicensor struct {
 // CachedAiringEpisode for storing information about airing episodes
 type CachedAiringEpisode struct {
 	gorm.Model
-	AnimeID         uint
-	AiringAt        int
-	TimeUntilAiring int
-	Episode         int
-	IsNext          bool `gorm:"index"` // true if this is the next airing episode
+	AnimeID  uint
+	AiringAt int
+	Episode  int
+	IsNext   bool `gorm:"index"` // true if this is the next airing episode
 }
 
 // CachedEpisodeTitles for episode title variants

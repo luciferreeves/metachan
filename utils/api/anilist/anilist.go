@@ -26,7 +26,7 @@ func NewAniListClient() *AniListClient {
 func (c *AniListClient) GetAnime(anilistID int) (*AnilistAnimeResponse, error) {
 	// Create a much simpler request with minimal formatting that might trigger Cloudflare
 	query := `
-	query ($id: Int) {
+	query($id: Int) {
 		Media(id: $id, type: ANIME) {
 			id
 			idMal
@@ -40,8 +40,16 @@ func (c *AniListClient) GetAnime(anilistID int) (*AnilistAnimeResponse, error) {
 			format
 			status
 			description
-			startDate { year month day }
-			endDate { year month day }
+			startDate {
+				year
+				month
+				day
+			}
+			endDate {
+				year
+				month
+				day
+			}
 			season
 			seasonYear
 			episodes
@@ -52,7 +60,11 @@ func (c *AniListClient) GetAnime(anilistID int) (*AnilistAnimeResponse, error) {
 			isLicensed
 			source
 			hashtag
-			trailer { id site thumbnail }
+			trailer {
+				id
+				site
+				thumbnail
+			}
 			coverImage {
 				extraLarge
 				large
@@ -68,11 +80,109 @@ func (c *AniListClient) GetAnime(anilistID int) (*AnilistAnimeResponse, error) {
 			isLocked
 			trending
 			favourites
-			tags { id name description category rank isGeneralSpoiler isMediaSpoiler isAdult }
-			nextAiringEpisode { id airingAt timeUntilAiring episode }
-			airingSchedule { nodes { id episode airingAt timeUntilAiring } }
-			studios { edges { isMain node { id name } } }
+			tags {
+				id
+				name
+				description
+				category
+				rank
+				isGeneralSpoiler
+				isMediaSpoiler
+				isAdult
+			}
+			relations {
+				edges {
+					id
+					relationType
+					node {
+						id
+						title {
+							romaji
+							english
+							native
+							userPreferred
+						}
+						format
+						type
+						status
+						coverImage {
+							extraLarge
+							large
+							medium
+							color
+						}
+						bannerImage
+					}
+				}
+			}
+			characters {
+				edges {
+					role
+					node {
+						id
+						name {
+							first
+							last
+							middle
+							full
+							native
+							userPreferred
+						}
+						image {
+							large
+							medium
+						}
+						description
+						age
+					}
+				}
+			}
+			staff {
+				edges {
+					role
+					node {
+						id
+						name {
+							first
+							last
+							middle
+							full
+							native
+							userPreferred
+						}
+						image {
+							large
+							medium
+						}
+						description
+						primaryOccupations
+						gender
+						age
+						languageV2
+					}
+				}
+			}
+			studios {
+				edges {
+					isMain
+					node {
+						id
+						name
+					}
+				}
+			}
 			isAdult
+			nextAiringEpisode { id airingAt episode timeUntilAiring }
+			airingSchedule { nodes { id episode airingAt timeUntilAiring } }
+			trends { nodes { date trending popularity inProgress } }
+			externalLinks { id url site }
+			streamingEpisodes { title thumbnail url site }
+			rankings { id rank type format year season allTime context }
+			stats {
+				scoreDistribution { score amount }
+				statusDistribution { status amount }
+			}
+			siteUrl
 		}
 	}
 	`
