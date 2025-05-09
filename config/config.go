@@ -19,9 +19,7 @@ func init() {
 		Fatal:  true,
 	}
 
-	if err := godotenv.Load(); err != nil {
-		logger.Log("Error loading environment variables", logOptions)
-	}
+	godotenv.Load()
 
 	Config = &types.ServerConfig{
 		DatabaseDriver: types.DatabaseDriver(getEnv("DB_DRIVER")),
