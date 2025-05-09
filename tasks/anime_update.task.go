@@ -140,8 +140,8 @@ func AnimeUpdate() error {
 
 		// Log update decision
 		if !needsUpdate {
-			logger.Log(fmt.Sprintf("Skipping update for %s (ID: %d) - no update needed",
-				series.TitleRomaji, series.MALID), logger.LogOptions{
+			logger.Log(fmt.Sprintf("Skipping update for %s (ID: %d) - no update needed. Next airing at: %d",
+				series.TitleRomaji, series.MALID, series.NextAiringEpisode.AiringAt), logger.LogOptions{
 				Level:  logger.Debug,
 				Prefix: "AnimeUpdate",
 			})
