@@ -12,11 +12,11 @@ RUN go mod download
 COPY . .
 RUN make build
 
-FROM alpine:latest
+FROM debian:bookworm-slim
 
 WORKDIR /metachan
 
-RUN apk --no-cache add ca-certificates tzdata
+RUN apt-get update && apt-get install -y ca-certificates tzdata && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /metachan/bin/metachan .
 
