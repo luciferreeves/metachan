@@ -202,53 +202,52 @@ func getAnimeCharacters(characterResponse *jikan.JikanAnimeCharacterResponse) []
 // getNextAiringEpisode extracts next airing episode data from AniList
 func getNextAiringEpisode(anilistAnime *anilist.AnilistAnimeResponse) types.AnimeAiringEpisode {
 	if anilistAnime == nil || anilistAnime.Data.Media.ID == 0 {
-		logger.Log("No valid AniList data for next airing episode", logger.LogOptions{
-			Level:  logger.Debug,
-			Prefix: "AnimeAPI",
-		})
 		return types.AnimeAiringEpisode{}
 	}
 
-	// NextAiringEpisode can be nil for completed anime
+	// Get the current time to determine the next episode
+	currentTime := time.Now().Unix()
 	nextEpisode := anilistAnime.Data.Media.NextAiringEpisode
 
-	// Check if there is valid data
-	if nextEpisode.AiringAt == 0 && nextEpisode.Episode == 0 {
-		logger.Log(fmt.Sprintf("Anime ID %d has no next airing episode", anilistAnime.Data.Media.ID), logger.LogOptions{
-			Level:  logger.Debug,
-			Prefix: "AnimeAPI",
-		})
-		return types.AnimeAiringEpisode{}
+	// If AniList provides a valid next airing episode directly, use it
+	if nextEpisode.AiringAt > 0 && nextEpisode.Episode > 0 {
+		return types.AnimeAiringEpisode{
+			AiringAt: nextEpisode.AiringAt,
+			Episode:  nextEpisode.Episode,
+		}
 	}
 
-	logger.Log(fmt.Sprintf("Found next airing episode %d at timestamp %d",
-		nextEpisode.Episode, nextEpisode.AiringAt), logger.LogOptions{
-		Level:  logger.Debug,
-		Prefix: "AnimeAPI",
-	})
+	// If AniList doesn't provide a direct next episode, but we have airing schedule nodes
+	// Find the next episode that hasn't aired yet
+	if anilistAnime.Data.Media.AiringSchedule.Nodes != nil && len(anilistAnime.Data.Media.AiringSchedule.Nodes) > 0 {
+		var nextAiringEpisode types.AnimeAiringEpisode
 
-	return types.AnimeAiringEpisode{
-		AiringAt: nextEpisode.AiringAt,
-		Episode:  nextEpisode.Episode,
+		for _, node := range anilistAnime.Data.Media.AiringSchedule.Nodes {
+			if int64(node.AiringAt) > currentTime {
+				// If this is the first future episode we've found, or it airs sooner than our current "next"
+				if nextAiringEpisode.AiringAt == 0 || node.AiringAt < nextAiringEpisode.AiringAt {
+					nextAiringEpisode.AiringAt = node.AiringAt
+					nextAiringEpisode.Episode = node.Episode
+				}
+			}
+		}
+
+		// If we found a next episode
+		if nextAiringEpisode.AiringAt > 0 {
+			return nextAiringEpisode
+		}
 	}
+
+	return types.AnimeAiringEpisode{}
 }
 
 // getAnimeSchedule extracts airing schedule data from AniList
 func getAnimeSchedule(anilistAnime *anilist.AnilistAnimeResponse) []types.AnimeAiringEpisode {
-	if anilistAnime == nil {
+	if anilistAnime == nil || anilistAnime.Data.Media.AiringSchedule.Nodes == nil {
 		return []types.AnimeAiringEpisode{}
 	}
 
 	var schedule []types.AnimeAiringEpisode
-
-	// The nodes might be nil if there's no schedule
-	if anilistAnime.Data.Media.AiringSchedule.Nodes == nil {
-		logger.Log("No airing schedule found in AniList data", logger.LogOptions{
-			Level:  logger.Debug,
-			Prefix: "AnimeAPI",
-		})
-		return []types.AnimeAiringEpisode{}
-	}
 
 	for _, node := range anilistAnime.Data.Media.AiringSchedule.Nodes {
 		schedule = append(schedule, types.AnimeAiringEpisode{
@@ -256,11 +255,6 @@ func getAnimeSchedule(anilistAnime *anilist.AnilistAnimeResponse) []types.AnimeA
 			Episode:  node.Episode,
 		})
 	}
-
-	logger.Log(fmt.Sprintf("Found %d episodes in airing schedule", len(schedule)), logger.LogOptions{
-		Level:  logger.Debug,
-		Prefix: "AnimeAPI",
-	})
 
 	return schedule
 }

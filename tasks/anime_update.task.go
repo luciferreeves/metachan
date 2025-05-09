@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"fmt"
+	"metachan/config"
 	"metachan/database"
 	"metachan/entities"
 	"metachan/services/anime"
@@ -18,6 +19,12 @@ const (
 
 	// MaxConcurrentUpdates limits the number of concurrent anime updates
 	MaxConcurrentUpdates = 5
+
+	// MaxConcurrentSQLiteUpdates limits concurrent updates for SQLite to prevent locks
+	MaxConcurrentSQLiteUpdates = 1
+
+	// UpdateInterval defines how often an anime should be updated even without specific triggers
+	UpdateInterval = 6 * time.Hour
 )
 
 // animeUpdateJob represents a single anime update job
@@ -38,6 +45,7 @@ func AnimeUpdate() error {
 	result := database.DB.
 		Where("airing = ?", true).
 		Preload("NextAiringEpisode").
+		Preload("AiringSchedule").
 		Find(&airingSeries)
 
 	if result.Error != nil {
@@ -56,14 +64,32 @@ func AnimeUpdate() error {
 	// Get current timestamp
 	currentTime := time.Now().Unix()
 
+	// Log the current time for debugging
+	logger.Log(fmt.Sprintf("Current timestamp: %d (%s)",
+		currentTime, time.Unix(currentTime, 0).Format(time.RFC3339)), logger.LogOptions{
+		Level:  logger.Debug,
+		Prefix: "AnimeUpdate",
+	})
+
 	// Create a channel for jobs
 	jobs := make(chan animeUpdateJob, len(airingSeries))
+
+	// Determine max concurrency based on database type
+	maxWorkers := MaxConcurrentUpdates
+	if config.Config.DatabaseDriver == types.SQLite {
+		maxWorkers = MaxConcurrentSQLiteUpdates
+		logger.Log(fmt.Sprintf("Using reduced concurrency (%d workers) for SQLite database",
+			maxWorkers), logger.LogOptions{
+			Level:  logger.Debug,
+			Prefix: "AnimeUpdate",
+		})
+	}
 
 	// Create a wait group to wait for all workers to finish
 	var wg sync.WaitGroup
 
 	// Create workers
-	for i := 0; i < MaxConcurrentUpdates; i++ {
+	for i := 0; i < maxWorkers; i++ {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
@@ -88,27 +114,47 @@ func AnimeUpdate() error {
 		needsUpdate := false
 		reason := ""
 
+		// Log details about this particular anime for debugging
+		logger.Log(fmt.Sprintf("Checking anime: %s (ID: %d)",
+			series.TitleRomaji, series.MALID), logger.LogOptions{
+			Level:  logger.Debug,
+			Prefix: "AnimeUpdate",
+		})
+
 		// If there's no next airing episode data, we should update
-		if series.NextAiringEpisode == nil {
+		if series.NextAiringEpisode == nil || series.NextAiringEpisode.AiringAt == 0 {
 			needsUpdate = true
 			reason = "missing next episode data"
-		} else {
-			// Check if the next episode has already aired
-			if int64(series.NextAiringEpisode.AiringAt) < currentTime {
-				needsUpdate = true
-				reason = fmt.Sprintf("episode %d aired at %d (current: %d)",
-					series.NextAiringEpisode.Episode,
-					series.NextAiringEpisode.AiringAt,
-					currentTime)
-			}
+		} else if int64(series.NextAiringEpisode.AiringAt) <= currentTime {
+			// If the next episode should have aired already, update to get fresh data
+			needsUpdate = true
+			reason = "next episode already aired"
 		}
 
-		// Skip if no update is needed
+		// Check if the anime was last updated more than the update interval ago
+		if !needsUpdate && !series.LastUpdated.IsZero() && time.Since(series.LastUpdated) > UpdateInterval {
+			needsUpdate = true
+			reason = fmt.Sprintf("regular update (last updated %s ago)",
+				time.Since(series.LastUpdated).Round(time.Second))
+		}
+
+		// Log update decision
 		if !needsUpdate {
+			logger.Log(fmt.Sprintf("Skipping update for %s (ID: %d) - no update needed",
+				series.TitleRomaji, series.MALID), logger.LogOptions{
+				Level:  logger.Debug,
+				Prefix: "AnimeUpdate",
+			})
 			continue
 		}
 
 		// Add the job to the queue
+		logger.Log(fmt.Sprintf("Queueing update for %s (ID: %d) - Reason: %s",
+			series.TitleRomaji, series.MALID, reason), logger.LogOptions{
+			Level:  logger.Debug,
+			Prefix: "AnimeUpdate",
+		})
+
 		jobs <- animeUpdateJob{
 			series: series,
 			reason: reason,
@@ -163,6 +209,7 @@ func updateAnime(animeService *anime.Service, series entities.CachedAnime, reaso
 	oldCachedAnime, err := database.GetCachedAnimeByMALID(series.MALID)
 
 	if err != nil || shouldSaveUpdate(oldCachedAnime, updatedAnime) {
+		saved = true
 		// Save the updated data to cache
 		if err := database.SaveAnimeToCache(updatedAnime); err != nil {
 			logger.Log(fmt.Sprintf("Failed to save updated data for MALID %d: %v", series.MALID, err), logger.LogOptions{
@@ -171,7 +218,6 @@ func updateAnime(animeService *anime.Service, series entities.CachedAnime, reaso
 			})
 			return
 		}
-		saved = true
 	}
 
 	status := "skipped (no significant changes)"
@@ -208,6 +254,22 @@ func shouldSaveUpdate(oldAnime *entities.CachedAnime, newAnime *types.Anime) boo
 	// Check if sub/dub count changed
 	if oldAnimeConverted.Episodes.Subbed != newAnime.Episodes.Subbed ||
 		oldAnimeConverted.Episodes.Dubbed != newAnime.Episodes.Dubbed {
+		return true
+	}
+
+	// Check if airing status changed
+	if oldAnimeConverted.Airing != newAnime.Airing ||
+		oldAnimeConverted.Status != newAnime.Status {
+		return true
+	}
+
+	// Check if the total episode count has changed
+	if oldAnimeConverted.Episodes.Total != newAnime.Episodes.Total {
+		return true
+	}
+
+	// Check if number of episodes in the airing schedule changed
+	if len(oldAnimeConverted.AiringSchedule) != len(newAnime.AiringSchedule) {
 		return true
 	}
 

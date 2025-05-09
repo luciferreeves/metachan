@@ -68,6 +68,43 @@ func IsCacheValid(anime *entities.CachedAnime) bool {
 
 // SaveAnimeToCache saves or updates an anime in the cache
 func SaveAnimeToCache(animeData *types.Anime) error {
+	// For SQLite, add retry logic to handle database locks
+	var maxRetries = 5
+	var retryDelay = 500 * time.Millisecond
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		err := saveAnimeToCacheWithRetry(animeData)
+		if err == nil {
+			logger.Log(fmt.Sprintf("Successfully saved anime (MAL ID: %d) to cache", animeData.MALID), logger.LogOptions{
+				Level:  logger.Success,
+				Prefix: "AnimeCache",
+			})
+			return nil
+		}
+
+		// Check if it's a database lock error
+		if strings.Contains(err.Error(), "database is locked") {
+			logger.Log(fmt.Sprintf("Database locked (attempt %d/%d) for MAL ID %d: %v. Retrying in %v...",
+				attempt, maxRetries, animeData.MALID, err, retryDelay), logger.LogOptions{
+				Level:  logger.Warn,
+				Prefix: "AnimeCache",
+			})
+
+			time.Sleep(retryDelay)
+			retryDelay *= 2 // Exponential backoff
+			continue
+		}
+
+		// Non-lock error, just return it
+		return err
+	}
+
+	return fmt.Errorf("failed to save anime (MAL ID: %d) after %d retries: database is locked",
+		animeData.MALID, maxRetries)
+}
+
+// saveAnimeToCacheWithRetry is the internal implementation of SaveAnimeToCache
+func saveAnimeToCacheWithRetry(animeData *types.Anime) error {
 	// Start a transaction
 	tx := DB.Begin()
 	defer func() {
@@ -86,14 +123,32 @@ func SaveAnimeToCache(animeData *types.Anime) error {
 
 	// If exists, delete the existing record and all its relations to avoid duplicates
 	if result.Error == nil {
-		if err := deleteExistingAnimeCache(tx, existingAnime.ID); err != nil {
+		// First directly delete the record with raw SQL to bypass GORM's hooks
+		// which might be causing issues with constraints
+		if err := tx.Exec("DELETE FROM cached_animes WHERE mal_id = ?", animeData.MALID).Error; err != nil {
+			logger.Log(fmt.Sprintf("Failed to delete existing anime with direct SQL: %v", err), logger.LogOptions{
+				Level:  logger.Error,
+				Prefix: "AnimeCache",
+			})
 			tx.Rollback()
 			return err
+		}
+
+		// Then also try the standard deleteExistingAnimeCache to clean up related records
+		if err := deleteExistingAnimeCache(tx, existingAnime.ID); err != nil {
+			logger.Log(fmt.Sprintf("Warning: Issue with deleteExistingAnimeCache: %v", err), logger.LogOptions{
+				Level:  logger.Warn,
+				Prefix: "AnimeCache",
+			})
+			// Don't rollback here, we already deleted the main record which should address the constraint
 		}
 	}
 
 	// Create new cached anime
 	cachedAnime := convertToCachedAnime(animeData)
+
+	// Clear the ID to ensure we're creating a new record
+	cachedAnime.ID = 0
 
 	// Save the main anime record
 	if err := tx.Create(&cachedAnime).Error; err != nil {
@@ -106,8 +161,9 @@ func SaveAnimeToCache(animeData *types.Anime) error {
 		return err
 	}
 
+	// Log at debug level to avoid duplicate success messages
 	logger.Log(fmt.Sprintf("Successfully saved anime (MAL ID: %d) to cache", animeData.MALID), logger.LogOptions{
-		Level:  logger.Success,
+		Level:  logger.Debug,
 		Prefix: "AnimeCache",
 	})
 
@@ -116,37 +172,110 @@ func SaveAnimeToCache(animeData *types.Anime) error {
 
 // deleteExistingAnimeCache deletes an anime and all its relations from the cache
 func deleteExistingAnimeCache(tx *gorm.DB, animeID uint) error {
-	// Delete related entities in order to avoid foreign key constraints
-	tables := []string{
-		"cached_anime_voice_actors",
-		"cached_anime_characters",
-		"cached_episode_titles",
-		"cached_anime_single_episodes",
-		"cached_airing_episodes",
-		"cached_anime_licensors",
-		"cached_anime_studios",
-		"cached_anime_producers",
-		"cached_anime_genres",
-		"cached_anime_broadcasts",
-		"cached_airing_status_dates",
-		"cached_airing_statuses",
-		"cached_anime_scores",
-		"cached_anime_covers",
-		"cached_anime_logos",
-		"cached_anime_images",
-		"cached_anime_seasons",
-		"cached_animes",
+	// Define table structures with their foreign keys
+	tableRelations := map[string]struct {
+		Table      string
+		ForeignKey string
+		Special    bool // If true, needs special handling
+	}{
+		"cached_anime_voice_actors":    {"cached_anime_voice_actors", "character_id", true}, // Links to characters, not anime directly
+		"cached_anime_characters":      {"cached_anime_characters", "anime_id", false},
+		"cached_episode_titles":        {"cached_episode_titles", "episode_id", true}, // Links to episodes, not anime directly
+		"cached_anime_single_episodes": {"cached_anime_single_episodes", "anime_id", false},
+		"cached_next_episodes":         {"cached_next_episodes", "anime_id", false},
+		"cached_schedule_episodes":     {"cached_schedule_episodes", "anime_id", false},
+		"cached_anime_licensors":       {"cached_anime_licensors", "anime_id", false},
+		"cached_anime_studios":         {"cached_anime_studios", "anime_id", false},
+		"cached_anime_producers":       {"cached_anime_producers", "anime_id", false},
+		"cached_anime_genres":          {"cached_anime_genres", "anime_id", false},
+		"cached_anime_broadcasts":      {"cached_anime_broadcasts", "anime_id", false},
+		"cached_airing_status_dates":   {"cached_airing_status_dates", "airing_status_id", true}, // Links to airing status, not anime directly
+		"cached_airing_statuses":       {"cached_airing_statuses", "anime_id", false},
+		"cached_anime_scores":          {"cached_anime_scores", "anime_id", false},
+		"cached_anime_covers":          {"cached_anime_covers", "anime_id", false},
+		"cached_anime_logos":           {"cached_anime_logos", "anime_id", false},
+		"cached_anime_images":          {"cached_anime_images", "anime_id", false},
+		"cached_anime_seasons":         {"cached_anime_seasons", "parent_anime_id", false}, // Uses parent_anime_id
+		"cached_animes":                {"cached_animes", "id", true},                      // Uses id instead of anime_id
 	}
 
-	for _, table := range tables {
-		query := fmt.Sprintf("DELETE FROM %s WHERE anime_id = ?", table)
-		if table == "cached_animes" {
-			query = "DELETE FROM cached_animes WHERE id = ?"
+	// First, find all the character IDs associated with this anime
+	var characterIDs []uint
+	if err := tx.Table("cached_anime_characters").Where("anime_id = ?", animeID).Pluck("id", &characterIDs).Error; err != nil {
+		// If there's an error, it might be that the table doesn't exist yet
+		logger.Log(fmt.Sprintf("Note: Could not find character IDs: %v", err), logger.LogOptions{
+			Level:  logger.Debug,
+			Prefix: "AnimeCache",
+		})
+	}
+
+	// Find all episode IDs associated with this anime
+	var episodeIDs []uint
+	if err := tx.Table("cached_anime_single_episodes").Where("anime_id = ?", animeID).Pluck("id", &episodeIDs).Error; err != nil {
+		logger.Log(fmt.Sprintf("Note: Could not find episode IDs: %v", err), logger.LogOptions{
+			Level:  logger.Debug,
+			Prefix: "AnimeCache",
+		})
+	}
+
+	// Find all airing status IDs associated with this anime
+	var airingStatusIDs []uint
+	if err := tx.Table("cached_airing_statuses").Where("anime_id = ?", animeID).Pluck("id", &airingStatusIDs).Error; err != nil {
+		logger.Log(fmt.Sprintf("Note: Could not find airing status IDs: %v", err), logger.LogOptions{
+			Level:  logger.Debug,
+			Prefix: "AnimeCache",
+		})
+	}
+
+	// Delete voice actors by character IDs
+	if len(characterIDs) > 0 {
+		if err := tx.Where("character_id IN ?", characterIDs).Delete(&entities.CachedAnimeVoiceActor{}).Error; err != nil {
+			logger.Log(fmt.Sprintf("Failed to delete voice actors: %v", err), logger.LogOptions{
+				Level:  logger.Warn,
+				Prefix: "AnimeCache",
+			})
+		}
+	}
+
+	// Delete episode titles by episode IDs
+	if len(episodeIDs) > 0 {
+		if err := tx.Where("episode_id IN ?", episodeIDs).Delete(&entities.CachedEpisodeTitles{}).Error; err != nil {
+			logger.Log(fmt.Sprintf("Failed to delete episode titles: %v", err), logger.LogOptions{
+				Level:  logger.Warn,
+				Prefix: "AnimeCache",
+			})
+		}
+	}
+
+	// Delete airing status dates by airing status IDs
+	if len(airingStatusIDs) > 0 {
+		if err := tx.Where("airing_status_id IN ?", airingStatusIDs).Delete(&entities.CachedAiringStatusDates{}).Error; err != nil {
+			logger.Log(fmt.Sprintf("Failed to delete airing status dates: %v", err), logger.LogOptions{
+				Level:  logger.Warn,
+				Prefix: "AnimeCache",
+			})
+		}
+	}
+
+	// Now delete the remaining tables with direct anime_id or parent_anime_id references
+	for name, relation := range tableRelations {
+		if relation.Special {
+			continue // Skip special cases we've already handled
 		}
 
+		query := fmt.Sprintf("DELETE FROM %s WHERE %s = ?", relation.Table, relation.ForeignKey)
 		if err := tx.Exec(query, animeID).Error; err != nil {
-			return err
+			logger.Log(fmt.Sprintf("Failed to delete from %s: %v", name, err), logger.LogOptions{
+				Level:  logger.Warn,
+				Prefix: "AnimeCache",
+			})
+			// Continue anyway - don't stop the entire delete operation
 		}
+	}
+
+	// Finally delete the anime itself
+	if err := tx.Where("id = ?", animeID).Delete(&entities.CachedAnime{}).Error; err != nil {
+		return fmt.Errorf("failed to delete cached anime with ID %d: %w", animeID, err)
 	}
 
 	return nil
@@ -304,7 +433,7 @@ func ConvertToTypesAnime(cachedAnime *entities.CachedAnime) *types.Anime {
 	}
 
 	// Fill in NextAiringEpisode
-	if cachedAnime.NextAiringEpisode != nil && cachedAnime.NextAiringEpisode.IsNext {
+	if cachedAnime.NextAiringEpisode != nil && cachedAnime.NextAiringEpisode.AiringAt > 0 && cachedAnime.NextAiringEpisode.Episode > 0 {
 		anime.NextAiringEpisode = types.AnimeAiringEpisode{
 			AiringAt: cachedAnime.NextAiringEpisode.AiringAt,
 			Episode:  cachedAnime.NextAiringEpisode.Episode,
@@ -466,7 +595,6 @@ func convertToCachedAnime(animeData *types.Anime) *entities.CachedAnime {
 		return nil
 	}
 
-	// Create the anime with basic fields
 	cachedAnime := &entities.CachedAnime{
 		MALID:         animeData.MALID,
 		TitleRomaji:   animeData.Titles.Romaji,
@@ -492,7 +620,7 @@ func convertToCachedAnime(animeData *types.Anime) *entities.CachedAnime {
 		Original: animeData.Images.Original,
 	}
 
-	// Add Logos if they exist
+	// Add Logos
 	cachedAnime.Logos = &entities.CachedAnimeLogos{
 		Small:    animeData.Logos.Small,
 		Medium:   animeData.Logos.Medium,
@@ -501,7 +629,7 @@ func convertToCachedAnime(animeData *types.Anime) *entities.CachedAnime {
 		Original: animeData.Logos.Original,
 	}
 
-	// Add Covers if they exist
+	// Add Covers
 	cachedAnime.Covers = &entities.CachedAnimeCovers{
 		Small:    animeData.Covers.Small,
 		Large:    animeData.Covers.Large,
@@ -518,33 +646,39 @@ func convertToCachedAnime(animeData *types.Anime) *entities.CachedAnime {
 		Favorites:  animeData.Scores.Favorites,
 	}
 
-	// Add AiringStatus with From and To dates
-	fromDates := &entities.CachedAiringStatusDates{
-		Day:    animeData.AiringStatus.From.Day,
-		Month:  animeData.AiringStatus.From.Month,
-		Year:   animeData.AiringStatus.From.Year,
-		String: animeData.AiringStatus.From.String,
-	}
+	// Add AiringStatus
+	if animeData.AiringStatus.From.Year > 0 || animeData.AiringStatus.From.String != "" {
+		cachedAnime.AiringStatus = &entities.CachedAiringStatus{
+			String: animeData.AiringStatus.String,
+		}
 
-	toDates := &entities.CachedAiringStatusDates{
-		Day:    animeData.AiringStatus.To.Day,
-		Month:  animeData.AiringStatus.To.Month,
-		Year:   animeData.AiringStatus.To.Year,
-		String: animeData.AiringStatus.To.String,
-	}
+		if animeData.AiringStatus.From.Year > 0 || animeData.AiringStatus.From.String != "" {
+			cachedAnime.AiringStatus.From = &entities.CachedAiringStatusDates{
+				Day:    animeData.AiringStatus.From.Day,
+				Month:  animeData.AiringStatus.From.Month,
+				Year:   animeData.AiringStatus.From.Year,
+				String: animeData.AiringStatus.From.String,
+			}
+		}
 
-	cachedAnime.AiringStatus = &entities.CachedAiringStatus{
-		String: animeData.AiringStatus.String,
-		From:   fromDates,
-		To:     toDates,
+		if animeData.AiringStatus.To.Year > 0 || animeData.AiringStatus.To.String != "" {
+			cachedAnime.AiringStatus.To = &entities.CachedAiringStatusDates{
+				Day:    animeData.AiringStatus.To.Day,
+				Month:  animeData.AiringStatus.To.Month,
+				Year:   animeData.AiringStatus.To.Year,
+				String: animeData.AiringStatus.To.String,
+			}
+		}
 	}
 
 	// Add Broadcast
-	cachedAnime.Broadcast = &entities.CachedAnimeBroadcast{
-		Day:      animeData.Broadcast.Day,
-		Time:     animeData.Broadcast.Time,
-		Timezone: animeData.Broadcast.Timezone,
-		String:   animeData.Broadcast.String,
+	if animeData.Broadcast.Day != "" || animeData.Broadcast.Time != "" {
+		cachedAnime.Broadcast = &entities.CachedAnimeBroadcast{
+			Day:      animeData.Broadcast.Day,
+			Time:     animeData.Broadcast.Time,
+			Timezone: animeData.Broadcast.Timezone,
+			String:   animeData.Broadcast.String,
+		}
 	}
 
 	// Add Genres
@@ -595,23 +729,74 @@ func convertToCachedAnime(animeData *types.Anime) *entities.CachedAnime {
 		}
 	}
 
-	// Add NextAiringEpisode
-	if animeData.NextAiringEpisode.AiringAt != 0 {
-		cachedAnime.NextAiringEpisode = &entities.CachedAiringEpisode{
-			AiringAt: animeData.NextAiringEpisode.AiringAt,
-			Episode:  animeData.NextAiringEpisode.Episode,
-			IsNext:   true,
+	// Get the current timestamp
+	currentTime := time.Now().Unix()
+
+	// Determine the next airing episode from the schedule
+	var nextEpisode *types.AnimeAiringEpisode
+
+	// Process next airing episode data - first check if there's a valid next airing episode directly provided
+	if animeData.NextAiringEpisode.AiringAt > 0 && animeData.NextAiringEpisode.Episode > 0 {
+		// Check if it's still in the future
+		if int64(animeData.NextAiringEpisode.AiringAt) > currentTime {
+			nextEpisode = &types.AnimeAiringEpisode{
+				AiringAt: animeData.NextAiringEpisode.AiringAt,
+				Episode:  animeData.NextAiringEpisode.Episode,
+			}
 		}
+	}
+
+	// If we don't have a valid next episode yet, or the one we have has already aired,
+	// scan the schedule to find the actual next episode
+	if (nextEpisode == nil || nextEpisode.AiringAt == 0) && len(animeData.AiringSchedule) > 0 {
+		// Sort the schedule by airing time
+		sortedSchedule := make([]types.AnimeAiringEpisode, len(animeData.AiringSchedule))
+		copy(sortedSchedule, animeData.AiringSchedule)
+
+		// Sort by airing time
+		for i := 0; i < len(sortedSchedule)-1; i++ {
+			for j := i + 1; j < len(sortedSchedule); j++ {
+				if sortedSchedule[i].AiringAt > sortedSchedule[j].AiringAt {
+					sortedSchedule[i], sortedSchedule[j] = sortedSchedule[j], sortedSchedule[i]
+				}
+			}
+		}
+
+		// Find the first episode that hasn't aired yet
+		for _, episode := range sortedSchedule {
+			if int64(episode.AiringAt) > currentTime {
+				nextEpisode = &types.AnimeAiringEpisode{
+					AiringAt: episode.AiringAt,
+					Episode:  episode.Episode,
+				}
+				break
+			}
+		}
+	}
+
+	// Add NextAiringEpisode if we found a valid next episode
+	if nextEpisode != nil && nextEpisode.AiringAt > 0 {
+		cachedAnime.NextAiringEpisode = &entities.CachedNextEpisode{
+			AiringAt: nextEpisode.AiringAt,
+			Episode:  nextEpisode.Episode,
+		}
+		logger.Log(fmt.Sprintf("Set next airing episode for %s (ID: %d): Episode %d at %s",
+			cachedAnime.TitleRomaji, cachedAnime.MALID,
+			nextEpisode.Episode,
+			time.Unix(int64(nextEpisode.AiringAt), 0).Format(time.RFC3339)),
+			logger.LogOptions{
+				Level:  logger.Debug,
+				Prefix: "AnimeCache",
+			})
 	}
 
 	// Add AiringSchedule
 	if len(animeData.AiringSchedule) > 0 {
-		cachedAnime.AiringSchedule = make([]entities.CachedAiringEpisode, len(animeData.AiringSchedule))
+		cachedAnime.AiringSchedule = make([]entities.CachedScheduleEpisode, len(animeData.AiringSchedule))
 		for i, episode := range animeData.AiringSchedule {
-			cachedAnime.AiringSchedule[i] = entities.CachedAiringEpisode{
+			cachedAnime.AiringSchedule[i] = entities.CachedScheduleEpisode{
 				AiringAt: episode.AiringAt,
 				Episode:  episode.Episode,
-				IsNext:   false, // Only the dedicated next episode is marked true
 			}
 		}
 	}
@@ -620,7 +805,8 @@ func convertToCachedAnime(animeData *types.Anime) *entities.CachedAnime {
 	if len(animeData.Episodes.Episodes) > 0 {
 		cachedAnime.Episodes = make([]entities.CachedAnimeSingleEpisode, len(animeData.Episodes.Episodes))
 		for i, episode := range animeData.Episodes.Episodes {
-			episodeTitles := &entities.CachedEpisodeTitles{
+			// Create episode titles
+			titles := &entities.CachedEpisodeTitles{
 				English:  episode.Titles.English,
 				Japanese: episode.Titles.Japanese,
 				Romaji:   episode.Titles.Romaji,
@@ -635,7 +821,7 @@ func convertToCachedAnime(animeData *types.Anime) *entities.CachedAnime {
 				ForumURL:     episode.ForumURL,
 				URL:          episode.URL,
 				ThumbnailURL: episode.ThumbnailURL,
-				Titles:       episodeTitles,
+				Titles:       titles,
 			}
 		}
 	}
@@ -644,7 +830,7 @@ func convertToCachedAnime(animeData *types.Anime) *entities.CachedAnime {
 	if len(animeData.Characters) > 0 {
 		cachedAnime.Characters = make([]entities.CachedAnimeCharacter, len(animeData.Characters))
 		for i, character := range animeData.Characters {
-			cachedCharacter := entities.CachedAnimeCharacter{
+			char := entities.CachedAnimeCharacter{
 				MALID:    character.MALID,
 				URL:      character.URL,
 				ImageURL: character.ImageURL,
@@ -653,9 +839,9 @@ func convertToCachedAnime(animeData *types.Anime) *entities.CachedAnime {
 			}
 
 			if len(character.VoiceActors) > 0 {
-				cachedCharacter.VoiceActors = make([]entities.CachedAnimeVoiceActor, len(character.VoiceActors))
+				char.VoiceActors = make([]entities.CachedAnimeVoiceActor, len(character.VoiceActors))
 				for j, va := range character.VoiceActors {
-					cachedCharacter.VoiceActors[j] = entities.CachedAnimeVoiceActor{
+					char.VoiceActors[j] = entities.CachedAnimeVoiceActor{
 						MALID:    va.MALID,
 						URL:      va.URL,
 						Image:    va.Image,
@@ -664,8 +850,7 @@ func convertToCachedAnime(animeData *types.Anime) *entities.CachedAnime {
 					}
 				}
 			}
-
-			cachedAnime.Characters[i] = cachedCharacter
+			cachedAnime.Characters[i] = char
 		}
 	}
 
@@ -673,46 +858,8 @@ func convertToCachedAnime(animeData *types.Anime) *entities.CachedAnime {
 	if len(animeData.Seasons) > 0 {
 		cachedAnime.Seasons = make([]entities.CachedAnimeSeason, len(animeData.Seasons))
 		for i, season := range animeData.Seasons {
-			// Create the related entities first to get their IDs
-			seasonImages := &entities.CachedAnimeImages{
-				Small:    season.Images.Small,
-				Large:    season.Images.Large,
-				Original: season.Images.Original,
-			}
-
-			seasonScores := &entities.CachedAnimeScores{
-				Score:      season.Scores.Score,
-				ScoredBy:   season.Scores.ScoredBy,
-				Rank:       season.Scores.Rank,
-				Popularity: season.Scores.Popularity,
-				Members:    season.Scores.Members,
-				Favorites:  season.Scores.Favorites,
-			}
-
-			// Create airing status dates
-			seasonFromDates := &entities.CachedAiringStatusDates{
-				Day:    season.AiringStatus.From.Day,
-				Month:  season.AiringStatus.From.Month,
-				Year:   season.AiringStatus.From.Year,
-				String: season.AiringStatus.From.String,
-			}
-
-			seasonToDates := &entities.CachedAiringStatusDates{
-				Day:    season.AiringStatus.To.Day,
-				Month:  season.AiringStatus.To.Month,
-				Year:   season.AiringStatus.To.Year,
-				String: season.AiringStatus.To.String,
-			}
-
-			// Create airing status
-			seasonAiringStatus := &entities.CachedAiringStatus{
-				String: season.AiringStatus.String,
-				From:   seasonFromDates,
-				To:     seasonToDates,
-			}
-
-			// Create the season with references to related entities
 			cachedSeason := entities.CachedAnimeSeason{
+				ParentAnimeID: cachedAnime.ID,
 				MALID:         season.MALID,
 				TitleRomaji:   season.Titles.Romaji,
 				TitleEnglish:  season.Titles.English,
@@ -727,11 +874,48 @@ func convertToCachedAnime(animeData *types.Anime) *entities.CachedAnime {
 				Season:        season.Season,
 				Year:          season.Year,
 				Current:       season.Current,
+			}
 
-				// Add references to related entities
-				Images:       seasonImages,
-				Scores:       seasonScores,
-				AiringStatus: seasonAiringStatus,
+			// Add Images
+			cachedSeason.Images = &entities.CachedAnimeImages{
+				Small:    season.Images.Small,
+				Large:    season.Images.Large,
+				Original: season.Images.Original,
+			}
+
+			// Add Scores
+			cachedSeason.Scores = &entities.CachedAnimeScores{
+				Score:      season.Scores.Score,
+				ScoredBy:   season.Scores.ScoredBy,
+				Rank:       season.Scores.Rank,
+				Popularity: season.Scores.Popularity,
+				Members:    season.Scores.Members,
+				Favorites:  season.Scores.Favorites,
+			}
+
+			// Add AiringStatus
+			if season.AiringStatus.From.Year > 0 || season.AiringStatus.From.String != "" {
+				cachedSeason.AiringStatus = &entities.CachedAiringStatus{
+					String: season.AiringStatus.String,
+				}
+
+				if season.AiringStatus.From.Year > 0 || season.AiringStatus.From.String != "" {
+					cachedSeason.AiringStatus.From = &entities.CachedAiringStatusDates{
+						Day:    season.AiringStatus.From.Day,
+						Month:  season.AiringStatus.From.Month,
+						Year:   season.AiringStatus.From.Year,
+						String: season.AiringStatus.From.String,
+					}
+				}
+
+				if season.AiringStatus.To.Year > 0 || season.AiringStatus.To.String != "" {
+					cachedSeason.AiringStatus.To = &entities.CachedAiringStatusDates{
+						Day:    season.AiringStatus.To.Day,
+						Month:  season.AiringStatus.To.Month,
+						Year:   season.AiringStatus.To.Year,
+						String: season.AiringStatus.To.String,
+					}
+				}
 			}
 
 			cachedAnime.Seasons[i] = cachedSeason

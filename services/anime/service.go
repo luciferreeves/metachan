@@ -57,7 +57,25 @@ func (s *Service) GetAnimeDetailsWithSource(mapping *entities.AnimeMapping, sour
 			})
 
 			// Convert the cached anime to the types.Anime format
-			return database.ConvertToTypesAnime(cachedAnime), nil
+			anime := database.ConvertToTypesAnime(cachedAnime)
+
+			// Ensure mappings are attached properly (this is the fix for the issue)
+			anime.Mappings = types.AnimeMappings{
+				AniDB:          mapping.AniDB,
+				Anilist:        mapping.Anilist,
+				AnimeCountdown: mapping.AnimeCountdown,
+				AnimePlanet:    mapping.AnimePlanet,
+				AniSearch:      mapping.AniSearch,
+				IMDB:           mapping.IMDB,
+				Kitsu:          mapping.Kitsu,
+				LiveChart:      mapping.LiveChart,
+				NotifyMoe:      mapping.NotifyMoe,
+				Simkl:          mapping.Simkl,
+				TMDB:           mapping.TMDB,
+				TVDB:           mapping.TVDB,
+			}
+
+			return anime, nil
 		}
 	} else {
 		logger.Log(fmt.Sprintf("Bypassing cache for anime (MAL ID: %d) - source: %s", malID, source), logger.LogOptions{

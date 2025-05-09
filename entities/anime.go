@@ -62,7 +62,7 @@ type CachedAnime struct {
 	Scores            *CachedAnimeScores    `gorm:"foreignKey:AnimeID"`
 	AiringStatus      *CachedAiringStatus   `gorm:"foreignKey:AnimeID"`
 	Broadcast         *CachedAnimeBroadcast `gorm:"foreignKey:AnimeID"`
-	NextAiringEpisode *CachedAiringEpisode  `gorm:"foreignKey:AnimeID"`
+	NextAiringEpisode *CachedNextEpisode    `gorm:"foreignKey:AnimeID"`
 
 	// One-to-many relationships
 	Genres         []CachedAnimeGenre         `gorm:"foreignKey:AnimeID"`
@@ -71,7 +71,7 @@ type CachedAnime struct {
 	Licensors      []CachedAnimeLicensor      `gorm:"foreignKey:AnimeID"`
 	Episodes       []CachedAnimeSingleEpisode `gorm:"foreignKey:AnimeID"`
 	Characters     []CachedAnimeCharacter     `gorm:"foreignKey:AnimeID"`
-	AiringSchedule []CachedAiringEpisode      `gorm:"foreignKey:AnimeID;references:ID;foreignKey:AnimeID;constraint:OnDelete:CASCADE"`
+	AiringSchedule []CachedScheduleEpisode    `gorm:"foreignKey:AnimeID;constraint:OnDelete:CASCADE"`
 	Seasons        []CachedAnimeSeason        `gorm:"foreignKey:ParentAnimeID"`
 }
 
@@ -272,4 +272,20 @@ type CachedAnimeVoiceActor struct {
 	Image       string
 	Name        string
 	Language    string
+}
+
+// CachedNextEpisode for storing the next airing episode information
+type CachedNextEpisode struct {
+	gorm.Model
+	AnimeID  uint
+	AiringAt int
+	Episode  int
+}
+
+// CachedScheduleEpisode for storing information about scheduled episodes
+type CachedScheduleEpisode struct {
+	gorm.Model
+	AnimeID  uint
+	AiringAt int
+	Episode  int
 }
