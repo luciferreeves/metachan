@@ -2,6 +2,7 @@ package database
 
 import (
 	"fmt"
+	"metachan/config"
 	"metachan/entities"
 	"metachan/types"
 	"metachan/utils/logger"
@@ -150,10 +151,19 @@ func saveAnimeToCacheWithRetry(animeData *types.Anime) error {
 	// Clear the ID to ensure we're creating a new record
 	cachedAnime.ID = 0
 
-	// Save the main anime record
-	if err := tx.Create(&cachedAnime).Error; err != nil {
-		tx.Rollback()
-		return err
+	// Check if we're using SQLite and need to handle large datasets
+	if config.Config.DatabaseDriver == types.SQLite && hasLargeDataset(cachedAnime) {
+		// For SQLite with large datasets, save with batching
+		if err := saveCachedAnimeWithBatching(tx, cachedAnime); err != nil {
+			tx.Rollback()
+			return err
+		}
+	} else {
+		// For other databases or small datasets, use standard GORM create
+		if err := tx.Create(&cachedAnime).Error; err != nil {
+			tx.Rollback()
+			return err
+		}
 	}
 
 	// Commit the transaction
@@ -923,4 +933,134 @@ func convertToCachedAnime(animeData *types.Anime) *entities.CachedAnime {
 	}
 
 	return cachedAnime
+}
+
+// hasLargeDataset checks if the anime has a large number of episodes that might exceed SQLite limits
+func hasLargeDataset(anime *entities.CachedAnime) bool {
+	// SQLite has a limit of 999 variables per statement. Each episode has multiple fields,
+	// so we need to be conservative. If we have more than 100 episodes, use batching.
+	return len(anime.Episodes) > 100
+}
+
+// saveCachedAnimeWithBatching saves anime data using batching for large datasets (SQLite only)
+func saveCachedAnimeWithBatching(tx *gorm.DB, cachedAnime *entities.CachedAnime) error {
+	// First save the main anime record without episodes and other large collections
+	mainAnime := &entities.CachedAnime{
+		MALID:         cachedAnime.MALID,
+		TitleRomaji:   cachedAnime.TitleRomaji,
+		TitleEnglish:  cachedAnime.TitleEnglish,
+		TitleJapanese: cachedAnime.TitleJapanese,
+		TitleSynonyms: cachedAnime.TitleSynonyms,
+		Synopsis:      cachedAnime.Synopsis,
+		Type:          cachedAnime.Type,
+		Source:        cachedAnime.Source,
+		Airing:        cachedAnime.Airing,
+		Status:        cachedAnime.Status,
+		Duration:      cachedAnime.Duration,
+		Color:         cachedAnime.Color,
+		Season:        cachedAnime.Season,
+		Year:          cachedAnime.Year,
+		LastUpdated:   cachedAnime.LastUpdated,
+
+		// Include small collections that won't cause variable limit issues
+		Images:            cachedAnime.Images,
+		Logos:             cachedAnime.Logos,
+		Covers:            cachedAnime.Covers,
+		Scores:            cachedAnime.Scores,
+		AiringStatus:      cachedAnime.AiringStatus,
+		Broadcast:         cachedAnime.Broadcast,
+		NextAiringEpisode: cachedAnime.NextAiringEpisode,
+		Genres:            cachedAnime.Genres,
+		Producers:         cachedAnime.Producers,
+		Studios:           cachedAnime.Studios,
+		Licensors:         cachedAnime.Licensors,
+		AiringSchedule:    cachedAnime.AiringSchedule,
+	}
+
+	// Save main anime with small collections
+	if err := tx.Create(mainAnime).Error; err != nil {
+		return fmt.Errorf("failed to save main anime record: %w", err)
+	}
+
+	// Now handle large collections in batches
+	animeID := mainAnime.ID
+
+	// Save episodes in batches
+	if len(cachedAnime.Episodes) > 0 {
+		batchSize := 50
+		logger.Log(fmt.Sprintf("Saving %d episodes in batches of %d for anime %d",
+			len(cachedAnime.Episodes), batchSize, animeID), logger.LogOptions{
+			Level:  logger.Debug,
+			Prefix: "AnimeCache",
+		})
+
+		for i := 0; i < len(cachedAnime.Episodes); i += batchSize {
+			end := i + batchSize
+			if end > len(cachedAnime.Episodes) {
+				end = len(cachedAnime.Episodes)
+			}
+
+			batch := make([]entities.CachedAnimeSingleEpisode, end-i)
+			copy(batch, cachedAnime.Episodes[i:end])
+
+			// Set the anime ID for each episode in the batch
+			for j := range batch {
+				batch[j].AnimeID = animeID
+			}
+
+			if err := tx.Create(&batch).Error; err != nil {
+				return fmt.Errorf("failed to save episodes batch %d-%d: %w", i, end-1, err)
+			}
+		}
+	}
+
+	// Save characters in batches (they can also be large with voice actors)
+	if len(cachedAnime.Characters) > 0 {
+		batchSize := 20 // Smaller batch for characters due to nested voice actors
+
+		for i := 0; i < len(cachedAnime.Characters); i += batchSize {
+			end := i + batchSize
+			if end > len(cachedAnime.Characters) {
+				end = len(cachedAnime.Characters)
+			}
+
+			batch := make([]entities.CachedAnimeCharacter, end-i)
+			copy(batch, cachedAnime.Characters[i:end])
+
+			// Set the anime ID for each character in the batch
+			for j := range batch {
+				batch[j].AnimeID = animeID
+			}
+
+			if err := tx.Create(&batch).Error; err != nil {
+				return fmt.Errorf("failed to save characters batch %d-%d: %w", i, end-1, err)
+			}
+		}
+	}
+
+	// Save seasons in batches
+	if len(cachedAnime.Seasons) > 0 {
+		batchSize := 10 // Even smaller for seasons due to complex nested relationships
+
+		for i := 0; i < len(cachedAnime.Seasons); i += batchSize {
+			end := i + batchSize
+			if end > len(cachedAnime.Seasons) {
+				end = len(cachedAnime.Seasons)
+			}
+
+			batch := make([]entities.CachedAnimeSeason, end-i)
+			copy(batch, cachedAnime.Seasons[i:end])
+
+			// Set the parent anime ID for each season in the batch
+			for j := range batch {
+				batch[j].ParentAnimeID = animeID
+			}
+
+			if err := tx.Create(&batch).Error; err != nil {
+				return fmt.Errorf("failed to save seasons batch %d-%d: %w", i, end-1, err)
+			}
+		}
+	}
+
+	return nil
 }
