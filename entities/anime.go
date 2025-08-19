@@ -123,19 +123,18 @@ type CachedAnimeScores struct {
 // CachedAiringStatusDates for storing airing date information
 type CachedAiringStatusDates struct {
 	gorm.Model
-	AiringStatusID uint
-	Day            int
-	Month          int
-	Year           int
-	String         string
+	Day    int
+	Month  int
+	Year   int
+	String string
 }
 
 // CachedAiringStatus for storing anime airing status
 type CachedAiringStatus struct {
 	gorm.Model
 	AnimeID uint
-	FromID  uint
-	ToID    uint
+	FromID  *uint
+	ToID    *uint
 	String  string
 
 	From *CachedAiringStatusDates `gorm:"foreignKey:FromID"`
@@ -243,9 +242,9 @@ type CachedAnimeSeason struct {
 	Current       bool
 
 	// Relationships - fixing the foreign key references
-	ImagesID       uint
-	ScoresID       uint
-	AiringStatusID uint
+	ImagesID       *uint
+	ScoresID       *uint
+	AiringStatusID *uint
 
 	// Define proper relationships
 	Images       *CachedAnimeImages  `gorm:"foreignKey:ImagesID"`
