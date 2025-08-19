@@ -10,6 +10,15 @@ func GetAnimeMappingViaMALID(malID int) (*entities.AnimeMapping, error) {
 	return &mapping, nil
 }
 
+// GetAnimeMappingViaAnilistID retrieves an anime mapping by AniList ID
+func GetAnimeMappingViaAnilistID(anilistID int) (*entities.AnimeMapping, error) {
+	var mapping entities.AnimeMapping
+	if err := DB.Where("anilist = ?", anilistID).First(&mapping).Error; err != nil {
+		return nil, err
+	}
+	return &mapping, nil
+}
+
 // GetAnimeMappingsByTVDBID retrieves all anime mappings that share the same TVDB ID
 func GetAnimeMappingsByTVDBID(tvdbID int) ([]entities.AnimeMapping, error) {
 	var mappings []entities.AnimeMapping

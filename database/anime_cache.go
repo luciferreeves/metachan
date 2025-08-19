@@ -465,7 +465,6 @@ func ConvertToTypesAnime(cachedAnime *entities.CachedAnime) *types.Anime {
 	if len(cachedAnime.Episodes) > 0 {
 		anime.Episodes.Episodes = make([]types.AnimeSingleEpisode, len(cachedAnime.Episodes))
 
-		var subCount, dubCount int
 		for i, episode := range cachedAnime.Episodes {
 			episodeData := types.AnimeSingleEpisode{
 				Description:  episode.Description,
@@ -489,10 +488,10 @@ func ConvertToTypesAnime(cachedAnime *entities.CachedAnime) *types.Anime {
 			anime.Episodes.Episodes[i] = episodeData
 		}
 
-		anime.Episodes.Total = len(cachedAnime.Episodes)
-		anime.Episodes.Aired = len(cachedAnime.Episodes)
-		anime.Episodes.Subbed = subCount
-		anime.Episodes.Dubbed = dubCount
+		anime.Episodes.Total = cachedAnime.TotalEpisodes
+		anime.Episodes.Aired = cachedAnime.AiredEpisodes
+		anime.Episodes.Subbed = cachedAnime.SubbedCount
+		anime.Episodes.Dubbed = cachedAnime.DubbedCount
 	}
 
 	// Convert characters
@@ -620,6 +619,10 @@ func convertToCachedAnime(animeData *types.Anime) *entities.CachedAnime {
 		Color:         animeData.Color,
 		Season:        animeData.Season,
 		Year:          animeData.Year,
+		SubbedCount:   animeData.Episodes.Subbed,
+		DubbedCount:   animeData.Episodes.Dubbed,
+		TotalEpisodes: animeData.Episodes.Total,
+		AiredEpisodes: animeData.Episodes.Aired,
 		LastUpdated:   time.Now(),
 	}
 
@@ -960,6 +963,10 @@ func saveCachedAnimeWithBatching(tx *gorm.DB, cachedAnime *entities.CachedAnime)
 		Color:         cachedAnime.Color,
 		Season:        cachedAnime.Season,
 		Year:          cachedAnime.Year,
+		SubbedCount:   cachedAnime.SubbedCount,
+		DubbedCount:   cachedAnime.DubbedCount,
+		TotalEpisodes: cachedAnime.TotalEpisodes,
+		AiredEpisodes: cachedAnime.AiredEpisodes,
 		LastUpdated:   cachedAnime.LastUpdated,
 
 		// Include small collections that won't cause variable limit issues

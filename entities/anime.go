@@ -53,6 +53,10 @@ type CachedAnime struct {
 	Color         string
 	Season        string
 	Year          int
+	SubbedCount   int
+	DubbedCount   int
+	TotalEpisodes int
+	AiredEpisodes int
 	LastUpdated   time.Time
 
 	// Relationships

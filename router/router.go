@@ -11,8 +11,9 @@ func Initialize(router *fiber.App) {
 	router.Get("/health", controllers.HealthStatus)
 
 	// Anime routes
-	animeRouter := router.Group("/anime")
-	animeRouter.Get("/:mal_id", controllers.GetAnimeByMALID)
+	animeRouter := router.Group("/a")
+	animeRouter.Get("/:id", controllers.GetAnimeByMALID)
+	animeRouter.Get("/:id/episodes", controllers.GetAnimeEpisodesByMALID)
 
 	// 404 Default
 	router.Use(func(c *fiber.Ctx) error {

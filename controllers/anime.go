@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"metachan/database"
+	"metachan/entities"
 	animeService "metachan/services/anime"
 	"metachan/utils/logger"
 	"metachan/utils/mappers"
@@ -22,18 +23,9 @@ func getAnimeService() *animeService.Service {
 
 // GetAnimeByMALID fetches anime details by MAL ID
 func GetAnimeByMALID(c *fiber.Ctx) error {
-	malID := c.Params("mal_id")
-	if malID == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Query parameter MAL ID is required",
-		})
-	}
-
-	mapping, err := database.GetAnimeMappingViaMALID(mappers.ForceInt(malID))
+	mapping, err := getAnimeMapping(c)
 	if err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Anime not found",
-		})
+		return err
 	}
 
 	service := getAnimeService()
@@ -49,4 +41,51 @@ func GetAnimeByMALID(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(anime)
+}
+
+// GetAnimeEpisodesByMALID fetches anime episodes by MAL ID
+func GetAnimeEpisodesByMALID(c *fiber.Ctx) error {
+	mapping, err := getAnimeMapping(c)
+	if err != nil {
+		return err
+	}
+
+	service := getAnimeService()
+	anime, err := service.GetAnimeDetails(mapping)
+	if err != nil {
+		logger.Log("Failed to fetch anime episodes: "+err.Error(), logger.LogOptions{
+			Level:  logger.Error,
+			Prefix: "AnimeAPI",
+		})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to fetch anime episodes",
+		})
+	}
+
+	// Return only the episodes data
+	return c.JSON(anime.Episodes)
+}
+
+func getAnimeMapping(c *fiber.Ctx) (*entities.AnimeMapping, error) {
+	isAnilist := c.Query("provider") == "anilist"
+	malID := c.Params("id")
+	if malID == "" {
+		return nil, c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Query parameter MAL ID is required",
+		})
+	}
+
+	var mapping *entities.AnimeMapping
+	var err error
+	if isAnilist {
+		mapping, err = database.GetAnimeMappingViaAnilistID(mappers.ForceInt(malID))
+	} else {
+		mapping, err = database.GetAnimeMappingViaMALID(mappers.ForceInt(malID))
+	}
+	if err != nil {
+		return nil, c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "Anime mapping not found",
+		})
+	}
+	return mapping, nil
 }

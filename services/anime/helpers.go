@@ -53,6 +53,22 @@ func getEpisodeCount(malAnime *jikan.JikanAnimeResponse, anilistAnime *anilist.A
 	return episodes
 }
 
+// getEpisodeCountWithAiredFallback determines the total episode count, using aired episodes as fallback for long-running series
+func getEpisodeCountWithAiredFallback(malAnime *jikan.JikanAnimeResponse, anilistAnime *anilist.AnilistAnimeResponse, airedCount int) int {
+	totalFromAPIs := getEpisodeCount(malAnime, anilistAnime)
+
+	// For long-running series, if the aired count is significantly higher than API-reported total,
+	// use the aired count as a more accurate total (since APIs often report season/arc counts)
+	if airedCount > totalFromAPIs && airedCount > 100 {
+		// This indicates a long-running series where APIs might be reporting seasonal data
+		// For ongoing series, total should be at least as high as aired episodes
+		return airedCount
+	}
+
+	// For normal series, use the maximum from APIs
+	return max(totalFromAPIs, airedCount)
+}
+
 // sortSeasonsByAirDate sorts the seasons array chronologically by air date
 func sortSeasonsByAirDate(seasons *[]types.AnimeSeason) {
 	// First, collect seasons with valid dates
@@ -219,7 +235,7 @@ func getNextAiringEpisode(anilistAnime *anilist.AnilistAnimeResponse) types.Anim
 
 	// If AniList doesn't provide a direct next episode, but we have airing schedule nodes
 	// Find the next episode that hasn't aired yet
-	if anilistAnime.Data.Media.AiringSchedule.Nodes != nil && len(anilistAnime.Data.Media.AiringSchedule.Nodes) > 0 {
+	if len(anilistAnime.Data.Media.AiringSchedule.Nodes) > 0 {
 		var nextAiringEpisode types.AnimeAiringEpisode
 
 		for _, node := range anilistAnime.Data.Media.AiringSchedule.Nodes {

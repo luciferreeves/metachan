@@ -375,7 +375,7 @@ func (s *Service) GetAnimeDetailsWithSource(mapping *entities.AnimeMapping, sour
 		Licensors: generateLicensors(anime.Data.Licensors),
 		Seasons:   seasons,
 		Episodes: types.AnimeEpisodes{
-			Total:    getEpisodeCount(anime, anilistAnime),
+			Total:    getEpisodeCountWithAiredFallback(anime, anilistAnime, len(episodes.Data)),
 			Aired:    len(episodes.Data),
 			Subbed:   subbedCount,
 			Dubbed:   dubbedCount,
