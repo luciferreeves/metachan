@@ -35,6 +35,10 @@ func NewService() *Service {
 
 // GetAnimeDetailsWithSource fetches comprehensive anime details with source information
 func (s *Service) GetAnimeDetailsWithSource(mapping *entities.AnimeMapping, source string) (*types.Anime, error) {
+	if mapping == nil {
+		return nil, fmt.Errorf("anime mapping is nil")
+	}
+
 	startTime := time.Now()
 	defer func() {
 		duration := time.Since(startTime)
@@ -48,18 +52,15 @@ func (s *Service) GetAnimeDetailsWithSource(mapping *entities.AnimeMapping, sour
 
 	// For updater source, always fetch fresh data and skip cache
 	if source != "updater" {
-		// First, check if we have a valid cached version
-		cachedAnime, err := database.GetCachedAnimeByMALID(malID)
-		if err == nil && database.IsCacheValid(cachedAnime) {
-			logger.Log(fmt.Sprintf("Cache hit for anime (MAL ID: %d), returning cached data", malID), logger.LogOptions{
+		// First, check if we have an existing version in the database
+		anime, err := database.GetAnimeByMALID(malID)
+		if err == nil {
+			logger.Log(fmt.Sprintf("Found existing anime data (MAL ID: %d), returning stored data", malID), logger.LogOptions{
 				Level:  logger.Info,
-				Prefix: "AnimeCache",
+				Prefix: "AnimeDB",
 			})
 
-			// Convert the cached anime to the types.Anime format
-			anime := database.ConvertToTypesAnime(cachedAnime)
-
-			// Ensure mappings are attached properly (this is the fix for the issue)
+			// Ensure mappings are attached properly
 			anime.Mappings = types.AnimeMappings{
 				AniDB:          mapping.AniDB,
 				Anilist:        mapping.Anilist,
@@ -78,14 +79,14 @@ func (s *Service) GetAnimeDetailsWithSource(mapping *entities.AnimeMapping, sour
 			return anime, nil
 		}
 	} else {
-		logger.Log(fmt.Sprintf("Bypassing cache for anime (MAL ID: %d) - source: %s", malID, source), logger.LogOptions{
+		logger.Log(fmt.Sprintf("Bypassing database check for anime (MAL ID: %d) - source: %s", malID, source), logger.LogOptions{
 			Level:  logger.Info,
 			Prefix: "AnimeAPI",
 		})
 	}
 
 	// Rest of the implementation is the same as GetAnimeDetails
-	logger.Log(fmt.Sprintf("Cache miss for anime (MAL ID: %d), fetching fresh data", malID), logger.LogOptions{
+	logger.Log(fmt.Sprintf("No existing data for anime (MAL ID: %d), fetching fresh data", malID), logger.LogOptions{
 		Level:  logger.Info,
 		Prefix: "AnimeAPI",
 	})
@@ -432,25 +433,25 @@ func (s *Service) GetAnimeDetailsWithSource(mapping *entities.AnimeMapping, sour
 		})
 	}
 
-	// Save the anime to cache only if TMDB didn't fail
+	// Save the anime to database only if TMDB didn't fail
 	if tmdbError == nil {
 		go func() {
-			if err := database.SaveAnimeToCache(animeDetails); err != nil {
-				logger.Log(fmt.Sprintf("Failed to save anime to cache: %v", err), logger.LogOptions{
+			if err := database.SaveAnimeToDatabase(animeDetails); err != nil {
+				logger.Log(fmt.Sprintf("Failed to save anime to database: %v", err), logger.LogOptions{
 					Level:  logger.Error,
-					Prefix: "AnimeCache",
+					Prefix: "AnimeDB",
 				})
 			} else {
-				logger.Log(fmt.Sprintf("Successfully saved anime (MAL ID: %d) to cache", malID), logger.LogOptions{
+				logger.Log(fmt.Sprintf("Successfully saved anime (MAL ID: %d) to database", malID), logger.LogOptions{
 					Level:  logger.Debug,
-					Prefix: "AnimeCache",
+					Prefix: "AnimeDB",
 				})
 			}
 		}()
 	} else {
-		logger.Log(fmt.Sprintf("Skipping anime cache due to TMDB error: %v", tmdbError), logger.LogOptions{
+		logger.Log(fmt.Sprintf("Skipping anime database save due to TMDB error: %v", tmdbError), logger.LogOptions{
 			Level:  logger.Warn,
-			Prefix: "AnimeCache",
+			Prefix: "AnimeDB",
 		})
 	}
 

@@ -29,7 +29,7 @@ const (
 
 // animeUpdateJob represents a single anime update job
 type animeUpdateJob struct {
-	series entities.CachedAnime
+	series entities.Anime
 	reason string
 }
 
@@ -41,7 +41,7 @@ func AnimeUpdate() error {
 	})
 
 	// Find all currently airing anime
-	var airingSeries []entities.CachedAnime
+	var airingSeries []entities.Anime
 	result := database.DB.
 		Where("airing = ?", true).
 		Preload("NextAiringEpisode").
@@ -176,65 +176,80 @@ func AnimeUpdate() error {
 	return nil
 }
 
-// updateAnime handles updating a single anime
-func updateAnime(animeService *anime.Service, series entities.CachedAnime, reason string) {
-	// Get the mapping for this anime
-	mapping, err := database.GetAnimeMappingViaMALID(series.MALID)
-	if err != nil {
-		logger.Log(fmt.Sprintf("Failed to get mapping for MALID %d: %v", series.MALID, err), logger.LogOptions{
-			Level:  logger.Error,
-			Prefix: "AnimeUpdate",
-		})
-		return
+// updateAnime updates a single anime series
+func updateAnime(animeService *anime.Service, series entities.Anime, reason string) {
+	title := series.TitleRomaji
+	if series.TitleEnglish != "" {
+		title = series.TitleEnglish
 	}
 
-	logger.Log(fmt.Sprintf("Updating anime %s (MALID: %d) - Reason: %s",
-		series.TitleRomaji, series.MALID, reason), logger.LogOptions{
+	logger.Log(fmt.Sprintf("Updating anime: %s (MAL ID: %d) - %s", title, series.MALID, reason), logger.LogOptions{
 		Level:  logger.Info,
 		Prefix: "AnimeUpdate",
 	})
 
-	// Get fresh anime data
-	updatedAnime, err := animeService.GetAnimeDetailsWithSource(mapping, UpdaterSource)
+	// Get anime mapping for the service call
+	mapping, err := database.GetAnimeMappingViaMALID(series.MALID)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Failed to get fresh data for MALID %d: %v", series.MALID, err), logger.LogOptions{
+		logger.Log(fmt.Sprintf("Error getting anime mapping for %s (MAL ID: %d): %v", title, series.MALID, err), logger.LogOptions{
 			Level:  logger.Error,
 			Prefix: "AnimeUpdate",
 		})
 		return
 	}
 
-	// Check if significant changes occurred to save the update
-	saved := false
-	oldCachedAnime, err := database.GetCachedAnimeByMALID(series.MALID)
+	// Get updated anime data from API
+	updatedAnime, err := animeService.GetAnimeDetailsWithSource(mapping, "mal")
+	if err != nil {
+		logger.Log(fmt.Sprintf("Error getting updated anime data for %s (MAL ID: %d): %v", title, series.MALID, err), logger.LogOptions{
+			Level:  logger.Error,
+			Prefix: "AnimeUpdate",
+		})
+		return
+	}
 
-	if err != nil || shouldSaveUpdate(oldCachedAnime, updatedAnime) {
-		saved = true
-		// Save the updated data to cache
-		if err := database.SaveAnimeToCache(updatedAnime); err != nil {
-			logger.Log(fmt.Sprintf("Failed to save updated data for MALID %d: %v", series.MALID, err), logger.LogOptions{
+	logger.Log(fmt.Sprintf("Successfully updated anime: %s (MAL ID: %d)", title, series.MALID), logger.LogOptions{
+		Level:  logger.Info,
+		Prefix: "AnimeUpdate",
+	})
+
+	// Check if the updated anime data has significant changes that warrant saving
+	if shouldSaveUpdate(&series, updatedAnime) {
+		// Check if anime is still airing
+		if updatedAnime.Status != "RELEASING" && updatedAnime.Status != "AIRING" {
+			// Update the anime data to reflect that it's no longer airing
+			updatedAnime.Airing = false
+		}
+
+		if err := database.SaveAnimeToDatabase(updatedAnime); err != nil {
+			logger.Log(fmt.Sprintf("Error saving updated anime data for %s (MAL ID: %d): %v", title, series.MALID, err), logger.LogOptions{
 				Level:  logger.Error,
 				Prefix: "AnimeUpdate",
 			})
-			return
+		} else {
+			logger.Log(fmt.Sprintf("Successfully saved updated data for %s (MAL ID: %d)", title, series.MALID), logger.LogOptions{
+				Level:  logger.Info,
+				Prefix: "AnimeUpdate",
+			})
+
+			if !updatedAnime.Airing {
+				logger.Log(fmt.Sprintf("Anime %s (MAL ID: %d) is no longer airing. Status: %s", title, series.MALID, updatedAnime.Status), logger.LogOptions{
+					Level:  logger.Info,
+					Prefix: "AnimeUpdate",
+				})
+			}
 		}
+	} else {
+		logger.Log(fmt.Sprintf("No significant changes detected for %s (MAL ID: %d), skipping database update", title, series.MALID), logger.LogOptions{
+			Level:  logger.Debug,
+			Prefix: "AnimeUpdate",
+		})
 	}
-
-	status := "skipped (no significant changes)"
-	if saved {
-		status = "saved to database"
-	}
-
-	logger.Log(fmt.Sprintf("Update for %s (MALID: %d) complete - %s",
-		series.TitleRomaji, series.MALID, status), logger.LogOptions{
-		Level:  logger.Info,
-		Prefix: "AnimeUpdate",
-	})
 }
 
 // shouldSaveUpdate determines if the updated anime data has significant changes
 // that warrant saving it to the database
-func shouldSaveUpdate(oldAnime *entities.CachedAnime, newAnime *types.Anime) bool {
+func shouldSaveUpdate(oldAnime *entities.Anime, newAnime *types.Anime) bool {
 	if oldAnime == nil {
 		return true
 	}
