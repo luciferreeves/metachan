@@ -37,6 +37,7 @@ type EpisodeTitles struct {
 
 // AnimeSingleEpisode contains information about a single anime episode
 type AnimeSingleEpisode struct {
+	ID           string        `json:"id"`
 	Titles       EpisodeTitles `json:"titles"`
 	Description  string        `json:"description"`
 	Aired        string        `json:"aired"`

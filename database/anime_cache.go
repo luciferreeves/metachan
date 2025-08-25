@@ -305,6 +305,7 @@ func SaveAnimeToCache(animeData *types.Anime) error {
 		}
 
 		episodeRecord := &entities.CachedAnimeSingleEpisode{
+			EpisodeID:    episode.ID,
 			AnimeID:      anime.ID,
 			TitlesID:     titles.ID,
 			Description:  episode.Description,
@@ -600,6 +601,7 @@ func ConvertToTypesAnime(cached *entities.CachedAnime) *types.Anime {
 		anime.Episodes.Episodes = make([]types.AnimeSingleEpisode, len(cached.Episodes))
 		for i, episode := range cached.Episodes {
 			episodeData := types.AnimeSingleEpisode{
+				ID:           episode.EpisodeID,
 				Description:  episode.Description,
 				Aired:        episode.Aired,
 				Score:        episode.Score,

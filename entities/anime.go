@@ -208,6 +208,7 @@ type CachedEpisodeTitles struct {
 // CachedAnimeSingleEpisode for storing individual episode details
 type CachedAnimeSingleEpisode struct {
 	gorm.Model
+	EpisodeID    string `gorm:"uniqueIndex;size:32"`
 	AnimeID      uint
 	TitlesID     uint
 	Description  string `gorm:"type:text"`

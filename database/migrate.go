@@ -34,17 +34,17 @@ func AutoMigrate() {
 		&entities.CachedAnimeSeason{},
 	)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Error during auto migration: %v", err), logger.LogOptions{
-			Prefix: "Database",
+		logger.Log(fmt.Sprintf("Failed to migrate database: %v", err), logger.LogOptions{
 			Level:  logger.Error,
-			Fatal:  true,
-		})
-	} else {
-		logger.Log("Auto migration completed successfully", logger.LogOptions{
 			Prefix: "Database",
-			Level:  logger.Success,
 		})
+		panic(err)
 	}
+
+	logger.Log("Database migration completed successfully", logger.LogOptions{
+		Level:  logger.Info,
+		Prefix: "Database",
+	})
 }
 
 // Migrate creates and migrations all tables

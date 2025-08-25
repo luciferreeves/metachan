@@ -1,6 +1,7 @@
 package anime
 
 import (
+	"crypto/md5"
 	"crypto/tls"
 	"fmt"
 	"metachan/types"
@@ -15,17 +16,33 @@ import (
 	"time"
 )
 
-// generateBasicEpisodes creates a basic list of episode data from Jikan episodes
+func generateEpisodeID(titles types.EpisodeTitles) string {
+	var title string
+	if titles.English != "" {
+		title = titles.English
+	} else if titles.Romaji != "" {
+		title = titles.Romaji
+	} else {
+		title = titles.Japanese
+	}
+
+	hash := md5.Sum([]byte(title))
+	return fmt.Sprintf("%x", hash)
+}
+
 func generateBasicEpisodes(episodes []jikan.JikanAnimeEpisode) []types.AnimeSingleEpisode {
 	var animeEpisodes []types.AnimeSingleEpisode
 
 	for _, episode := range episodes {
+		titles := types.EpisodeTitles{
+			English:  episode.Title,
+			Japanese: episode.TitleJapanese,
+			Romaji:   episode.TitleRomaji,
+		}
+
 		animeEpisodes = append(animeEpisodes, types.AnimeSingleEpisode{
-			Titles: types.EpisodeTitles{
-				English:  episode.Title,
-				Japanese: episode.TitleJapanese,
-				Romaji:   episode.TitleRomaji,
-			},
+			ID:           generateEpisodeID(titles),
+			Titles:       titles,
 			Aired:        episode.Aired,
 			Score:        episode.Score,
 			Filler:       episode.Filler,
@@ -34,7 +51,6 @@ func generateBasicEpisodes(episodes []jikan.JikanAnimeEpisode) []types.AnimeSing
 			URL:          episode.URL,
 			Description:  "No description available",
 			ThumbnailURL: "",
-			// Stream field removed
 		})
 	}
 	return animeEpisodes

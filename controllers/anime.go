@@ -22,7 +22,7 @@ func getAnimeService() *animeService.Service {
 }
 
 // GetAnimeByMALID fetches anime details by MAL ID
-func GetAnimeByMALID(c *fiber.Ctx) error {
+func GetAnime(c *fiber.Ctx) error {
 	mapping, err := getAnimeMapping(c)
 	if err != nil {
 		return err
@@ -44,7 +44,7 @@ func GetAnimeByMALID(c *fiber.Ctx) error {
 }
 
 // GetAnimeEpisodesByMALID fetches anime episodes by MAL ID
-func GetAnimeEpisodesByMALID(c *fiber.Ctx) error {
+func GetAnimeEpisodes(c *fiber.Ctx) error {
 	mapping, err := getAnimeMapping(c)
 	if err != nil {
 		return err
@@ -64,6 +64,27 @@ func GetAnimeEpisodesByMALID(c *fiber.Ctx) error {
 
 	// Return only the episodes data
 	return c.JSON(anime.Episodes)
+}
+
+func GetAnimeCharacters(c *fiber.Ctx) error {
+	mapping, err := getAnimeMapping(c)
+	if err != nil {
+		return err
+	}
+
+	service := getAnimeService()
+	anime, err := service.GetAnimeDetails(mapping)
+	if err != nil {
+		logger.Log("Failed to fetch anime characters: "+err.Error(), logger.LogOptions{
+			Level:  logger.Error,
+			Prefix: "AnimeAPI",
+		})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to fetch anime characters",
+		})
+	}
+
+	return c.JSON(anime.Characters)
 }
 
 func getAnimeMapping(c *fiber.Ctx) (*entities.AnimeMapping, error) {
