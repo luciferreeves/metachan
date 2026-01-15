@@ -515,3 +515,22 @@ type CachedScheduleEpisode struct {
 	AiringAt int
 	Episode  int
 }
+
+// EpisodeStreamingSource stores individual streaming sources for episodes
+type EpisodeStreamingSource struct {
+	gorm.Model
+	EpisodeStreamingID uint
+	URL                string
+	Server             string
+	Type               string // M3U8, MP4, or embed
+}
+
+// EpisodeStreaming stores streaming data for a specific episode
+type EpisodeStreaming struct {
+	gorm.Model
+	EpisodeID  string                   `gorm:"uniqueIndex:idx_episode_streaming;size:32"`
+	AnimeID    uint                     `gorm:"uniqueIndex:idx_episode_streaming"`
+	SubSources []EpisodeStreamingSource `gorm:"foreignKey:EpisodeStreamingID;constraint:OnDelete:CASCADE"`
+	DubSources []EpisodeStreamingSource `gorm:"foreignKey:EpisodeStreamingID;constraint:OnDelete:CASCADE"`
+	LastFetch  time.Time
+}

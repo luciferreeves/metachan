@@ -314,3 +314,91 @@ func GetAnimeMappingsByTVDBID(tvdbID int) ([]entities.AnimeMapping, error) {
 	}
 	return mappings, nil
 }
+
+// GetEpisodeStreaming retrieves cached streaming data for an episode
+func GetEpisodeStreaming(episodeID string, animeID uint) (*entities.EpisodeStreaming, error) {
+	var streaming entities.EpisodeStreaming
+	result := DB.Preload("SubSources").
+		Preload("DubSources").
+		Where("episode_id = ? AND anime_id = ?", episodeID, animeID).
+		First(&streaming)
+
+	if result.Error != nil {
+		return nil, result.Error
+	}
+
+	// Check if data is stale (older than 7 days)
+	if time.Since(streaming.LastFetch) > 7*24*time.Hour {
+		return nil, fmt.Errorf("streaming data is stale")
+	}
+
+	return &streaming, nil
+}
+
+// SaveEpisodeStreaming saves streaming data to the database
+func SaveEpisodeStreaming(episodeID string, animeID uint, subSources, dubSources []types.AnimeStreamingSource) error {
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Delete existing streaming data for this episode
+	var existing entities.EpisodeStreaming
+	if err := tx.Where("episode_id = ? AND anime_id = ?", episodeID, animeID).First(&existing).Error; err == nil {
+		if err := tx.Delete(&existing).Error; err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+
+	// Create new streaming record
+	streaming := &entities.EpisodeStreaming{
+		EpisodeID: episodeID,
+		AnimeID:   animeID,
+		LastFetch: time.Now(),
+	}
+
+	// Save the main record first
+	if err := tx.Create(streaming).Error; err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	// Save sub sources
+	for _, source := range subSources {
+		subSource := entities.EpisodeStreamingSource{
+			EpisodeStreamingID: streaming.ID,
+			URL:                source.URL,
+			Server:             source.Server,
+			Type:               source.Type,
+		}
+		if err := tx.Create(&subSource).Error; err != nil {
+			tx.Rollback()
+			return err
+		}
+		streaming.SubSources = append(streaming.SubSources, subSource)
+	}
+
+	// Save dub sources
+	for _, source := range dubSources {
+		dubSource := entities.EpisodeStreamingSource{
+			EpisodeStreamingID: streaming.ID,
+			URL:                source.URL,
+			Server:             source.Server,
+			Type:               source.Type,
+		}
+		if err := tx.Create(&dubSource).Error; err != nil {
+			tx.Rollback()
+			return err
+		}
+		streaming.DubSources = append(streaming.DubSources, dubSource)
+	}
+
+	return tx.Commit().Error
+}

@@ -463,6 +463,89 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 	return s.GetAnimeDetailsWithSource(mapping, "api")
 }
 
+// GetEpisodeStreaming fetches streaming sources for a specific episode
+func (s *Service) GetEpisodeStreaming(title string, episodeNumber int, episodeID string, animeID uint) (*types.AnimeStreaming, error) {
+	// Try to get from database first
+	cached, err := database.GetEpisodeStreaming(episodeID, animeID)
+	if err == nil && cached != nil {
+		logger.Log(fmt.Sprintf("Using cached streaming data for episode %d", episodeNumber), logger.LogOptions{
+			Level:  logger.Debug,
+			Prefix: "AnimeService",
+		})
+
+		result := &types.AnimeStreaming{
+			Sub: make([]types.AnimeStreamingSource, len(cached.SubSources)),
+			Dub: make([]types.AnimeStreamingSource, len(cached.DubSources)),
+		}
+
+		for i, source := range cached.SubSources {
+			result.Sub[i] = types.AnimeStreamingSource{
+				URL:    source.URL,
+				Server: source.Server,
+				Type:   source.Type,
+			}
+		}
+
+		for i, source := range cached.DubSources {
+			result.Dub[i] = types.AnimeStreamingSource{
+				URL:    source.URL,
+				Server: source.Server,
+				Type:   source.Type,
+			}
+		}
+
+		return result, nil
+	}
+
+	// If not in cache or stale, fetch from API
+	logger.Log(fmt.Sprintf("Fetching fresh streaming data for episode %d from API", episodeNumber), logger.LogOptions{
+		Level:  logger.Debug,
+		Prefix: "AnimeService",
+	})
+
+	streaming, err := s.streamingClient.GetStreamingSources(title, episodeNumber)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get streaming sources: %w", err)
+	}
+
+	// Convert streaming API type to types package type
+	result := &types.AnimeStreaming{
+		Sub: make([]types.AnimeStreamingSource, len(streaming.Sub)),
+		Dub: make([]types.AnimeStreamingSource, len(streaming.Dub)),
+	}
+
+	for i, source := range streaming.Sub {
+		result.Sub[i] = types.AnimeStreamingSource{
+			URL:    source.URL,
+			Server: source.Server,
+			Type:   source.Type,
+		}
+	}
+
+	for i, source := range streaming.Dub {
+		result.Dub[i] = types.AnimeStreamingSource{
+			URL:    source.URL,
+			Server: source.Server,
+			Type:   source.Type,
+		}
+	}
+
+	// Save to database for future requests
+	if err := database.SaveEpisodeStreaming(episodeID, animeID, result.Sub, result.Dub); err != nil {
+		logger.Log(fmt.Sprintf("Failed to cache streaming data: %v", err), logger.LogOptions{
+			Level:  logger.Warn,
+			Prefix: "AnimeService",
+		})
+	} else {
+		logger.Log(fmt.Sprintf("Cached streaming data for episode %d", episodeNumber), logger.LogOptions{
+			Level:  logger.Debug,
+			Prefix: "AnimeService",
+		})
+	}
+
+	return result, nil
+}
+
 // getSeasonDetails fetches details for anime seasons
 func (s *Service) getSeasonDetails(mappings *[]entities.AnimeMapping, currentMALID int) []types.AnimeSeason {
 	// Helper function to fetch anime details for a single mapping

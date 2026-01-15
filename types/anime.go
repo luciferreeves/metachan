@@ -35,18 +35,32 @@ type EpisodeTitles struct {
 	Romaji   string `json:"romaji"`
 }
 
+// AnimeStreamingSource represents a single streaming source
+type AnimeStreamingSource struct {
+	URL    string `json:"url"`
+	Server string `json:"server"`
+	Type   string `json:"type"` // direct or embed
+}
+
+// AnimeStreaming represents all available streaming sources
+type AnimeStreaming struct {
+	Sub []AnimeStreamingSource `json:"sub"`
+	Dub []AnimeStreamingSource `json:"dub"`
+}
+
 // AnimeSingleEpisode contains information about a single anime episode
 type AnimeSingleEpisode struct {
-	ID           string        `json:"id"`
-	Titles       EpisodeTitles `json:"titles"`
-	Description  string        `json:"description"`
-	Aired        string        `json:"aired"`
-	Score        float64       `json:"score"`
-	Filler       bool          `json:"filler"`
-	Recap        bool          `json:"recap"`
-	ForumURL     string        `json:"forum_url"`
-	URL          string        `json:"url"`
-	ThumbnailURL string        `json:"thumbnail_url"`
+	ID           string          `json:"id"`
+	Titles       EpisodeTitles   `json:"titles"`
+	Description  string          `json:"description"`
+	Aired        string          `json:"aired"`
+	Score        float64         `json:"score"`
+	Filler       bool            `json:"filler"`
+	Recap        bool            `json:"recap"`
+	ForumURL     string          `json:"forum_url"`
+	URL          string          `json:"url"`
+	ThumbnailURL string          `json:"thumbnail_url"`
+	Streaming    *AnimeStreaming `json:"streaming,omitempty"`
 }
 
 // AnimeEpisodes contains information about all episodes of an anime

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"metachan/utils/logger"
 	"metachan/utils/mappers"
 	"net/http"
 	"net/url"
@@ -169,7 +170,7 @@ func (c *AllAnimeClient) processSourceURL(sourceURL, sourceType string) *AnimeSt
 	}
 
 	// Check if it's a direct stream link
-	directPatterns := []string{"fast4speed.rsvp", "sharepoint.com", ".m3u8", ".mp4"}
+	directPatterns := []string{"sharepoint.com", ".m3u8", ".mp4"}
 	for _, pattern := range directPatterns {
 		if strings.Contains(processedURL, pattern) {
 			return &AnimeStreamingSource{
@@ -191,12 +192,12 @@ func (c *AllAnimeClient) processSourceURL(sourceURL, sourceType string) *AnimeSt
 // getServerName maps AllAnime source types to readable server names
 func getServerName(sourceType string) string {
 	switch strings.ToLower(sourceType) {
-	case "default":
+	case "s-mp4":
 		return "Maria"
 	case "luf-mp4":
-		return "Rose"
-	case "s-mp4":
 		return "Sina"
+	case "default":
+		return "Rose"
 	default:
 		return sourceType
 	}
@@ -417,6 +418,12 @@ func (c *AllAnimeClient) GetEpisodeLinks(showID, episode, mode string) ([]AnimeS
 
 			// Only add direct sources
 			if sourceInfo.Type == "direct" {
+				// Transform type to M3U8 or MP4 based on URL
+				if strings.HasSuffix(sourceInfo.URL, ".m3u8") {
+					sourceInfo.Type = "M3U8"
+				} else {
+					sourceInfo.Type = "MP4"
+				}
 				links = append(links, *sourceInfo)
 			}
 		}
@@ -427,18 +434,35 @@ func (c *AllAnimeClient) GetEpisodeLinks(showID, episode, mode string) ([]AnimeS
 
 // GetStreamingSources fetches both sub and dub streaming sources for an anime episode
 func (c *AllAnimeClient) GetStreamingSources(title string, episodeNumber int) (*AnimeStreaming, error) {
+	logger.Log(fmt.Sprintf("Fetching streaming sources for '%s' episode %d", title, episodeNumber), logger.LogOptions{
+		Level:  logger.Debug,
+		Prefix: "Streaming",
+	})
+
 	// Search for the anime
 	searchResults, err := c.SearchAnime(title)
 	if err != nil {
+		logger.Log(fmt.Sprintf("Failed to search anime '%s': %v", title, err), logger.LogOptions{
+			Level:  logger.Error,
+			Prefix: "Streaming",
+		})
 		return nil, fmt.Errorf("failed to search for anime: %w", err)
 	}
 
 	if len(searchResults) == 0 {
+		logger.Log(fmt.Sprintf("No streaming sources found for '%s'", title), logger.LogOptions{
+			Level:  logger.Warn,
+			Prefix: "Streaming",
+		})
 		return nil, fmt.Errorf("no streaming sources found for '%s'", title)
 	}
 
 	// Use the best match (first result)
 	bestMatch := searchResults[0]
+	logger.Log(fmt.Sprintf("Best match: '%s' (ID: %s, Sub: %d, Dub: %d)", bestMatch.Name, bestMatch.ID, bestMatch.SubEpisodes, bestMatch.DubEpisodes), logger.LogOptions{
+		Level:  logger.Debug,
+		Prefix: "Streaming",
+	})
 
 	streaming := &AnimeStreaming{
 		Sub: []AnimeStreamingSource{},
@@ -464,6 +488,15 @@ func (c *AllAnimeClient) GetStreamingSources(title string, episodeNumber int) (*
 				subSources, err := c.GetEpisodeLinks(bestMatch.ID, closestEpisode, "sub")
 				if err == nil {
 					streaming.Sub = subSources
+					logger.Log(fmt.Sprintf("Found %d sub sources for episode %d", len(subSources), episodeNumber), logger.LogOptions{
+						Level:  logger.Debug,
+						Prefix: "Streaming",
+					})
+				} else {
+					logger.Log(fmt.Sprintf("Failed to get sub sources: %v", err), logger.LogOptions{
+						Level:  logger.Warn,
+						Prefix: "Streaming",
+					})
 				}
 			}
 		}
@@ -488,11 +521,24 @@ func (c *AllAnimeClient) GetStreamingSources(title string, episodeNumber int) (*
 				dubSources, err := c.GetEpisodeLinks(bestMatch.ID, closestEpisode, "dub")
 				if err == nil {
 					streaming.Dub = dubSources
+					logger.Log(fmt.Sprintf("Found %d dub sources for episode %d", len(dubSources), episodeNumber), logger.LogOptions{
+						Level:  logger.Debug,
+						Prefix: "Streaming",
+					})
+				} else {
+					logger.Log(fmt.Sprintf("Failed to get dub sources: %v", err), logger.LogOptions{
+						Level:  logger.Warn,
+						Prefix: "Streaming",
+					})
 				}
 			}
 		}
 	}
 
+	logger.Log(fmt.Sprintf("Successfully fetched streaming sources for episode %d (Sub: %d, Dub: %d)", episodeNumber, len(streaming.Sub), len(streaming.Dub)), logger.LogOptions{
+		Level:  logger.Info,
+		Prefix: "Streaming",
+	})
 	return streaming, nil
 }
 

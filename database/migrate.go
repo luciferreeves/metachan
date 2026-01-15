@@ -32,6 +32,10 @@ func AutoMigrate() {
 		&entities.AnimeCharacter{},
 		&entities.AnimeVoiceActor{},
 		&entities.AnimeSeason{},
+
+		// Streaming entities
+		&entities.EpisodeStreaming{},
+		&entities.EpisodeStreamingSource{},
 	)
 	if err != nil {
 		logger.Log(fmt.Sprintf("Failed to migrate database: %v", err), logger.LogOptions{

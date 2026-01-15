@@ -66,6 +66,56 @@ func GetAnimeEpisodes(c *fiber.Ctx) error {
 	return c.JSON(anime.Episodes)
 }
 
+// GetAnimeEpisode fetches a single episode by anime ID and episode ID
+func GetAnimeEpisode(c *fiber.Ctx) error {
+	mapping, err := getAnimeMapping(c)
+	if err != nil {
+		return err
+	}
+
+	episodeID := c.Params("episodeId")
+	if episodeID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Episode ID is required",
+		})
+	}
+
+	service := getAnimeService()
+	anime, err := service.GetAnimeDetails(mapping)
+	if err != nil {
+		logger.Log("Failed to fetch anime details: "+err.Error(), logger.LogOptions{
+			Level:  logger.Error,
+			Prefix: "AnimeAPI",
+		})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to fetch anime details",
+		})
+	}
+
+	// Find the episode with matching ID
+	for i, episode := range anime.Episodes.Episodes {
+		if episode.ID == episodeID {
+			// Fetch streaming sources for this specific episode
+			episodeNumber := i + 1
+			streaming, err := service.GetEpisodeStreaming(anime.Titles.Romaji, episodeNumber, episode.ID, uint(anime.MALID))
+			if err != nil {
+				logger.Log("Failed to fetch streaming sources: "+err.Error(), logger.LogOptions{
+					Level:  logger.Warn,
+					Prefix: "AnimeAPI",
+				})
+				// Continue without streaming data
+			} else {
+				episode.Streaming = streaming
+			}
+			return c.JSON(episode)
+		}
+	}
+
+	return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+		"error": "Episode not found",
+	})
+}
+
 func GetAnimeCharacters(c *fiber.Ctx) error {
 	mapping, err := getAnimeMapping(c)
 	if err != nil {

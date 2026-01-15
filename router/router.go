@@ -14,6 +14,7 @@ func Initialize(router *fiber.App) {
 	animeRouter := router.Group("/a")
 	animeRouter.Get("/:id", controllers.GetAnime)
 	animeRouter.Get("/:id/episodes", controllers.GetAnimeEpisodes)
+	animeRouter.Get("/:id/episodes/:episodeId", controllers.GetAnimeEpisode)
 	animeRouter.Get("/:id/characters", controllers.GetAnimeCharacters)
 
 	// 404 Default
