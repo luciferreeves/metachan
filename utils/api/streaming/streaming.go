@@ -420,7 +420,7 @@ func (c *AllAnimeClient) GetEpisodeLinks(showID, episode, mode string) ([]AnimeS
 			if sourceInfo.Type == "direct" {
 				// Transform type to M3U8 or MP4 based on URL
 				if strings.HasSuffix(sourceInfo.URL, ".m3u8") {
-					sourceInfo.Type = "M3U8"
+					sourceInfo.Type = "HLS"
 				} else {
 					sourceInfo.Type = "MP4"
 				}
