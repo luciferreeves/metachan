@@ -153,10 +153,11 @@ func getAnimeMapping(c *fiber.Ctx) (*entities.AnimeMapping, error) {
 	} else {
 		mapping, err = database.GetAnimeMappingViaMALID(mappers.ForceInt(malID))
 	}
-	if err != nil {
+	if err != nil || mapping.MAL == 0 {
 		return nil, c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": "Anime mapping not found",
 		})
 	}
+
 	return mapping, nil
 }
