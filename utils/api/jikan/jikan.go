@@ -8,6 +8,7 @@ import (
 	"math"
 	"metachan/utils/ratelimit"
 	"net/http"
+	"os/exec"
 	"strconv"
 	"time"
 )
@@ -152,7 +153,12 @@ func (c *JikanClient) GetFullAnime(malID int) (*JikanAnimeResponse, error) {
 
 	bodyBytes, err := c.makeRequest(ctx, apiURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get anime full data: %w", err)
+		// Fallback to curl if HTTP client fails
+		var curlErr error
+		bodyBytes, curlErr = c.makeRequestWithCurl(apiURL)
+		if curlErr != nil {
+			return nil, fmt.Errorf("failed to get anime full data via HTTP (%w) and curl (%v)", err, curlErr)
+		}
 	}
 
 	var animeResponse JikanAnimeResponse
@@ -165,6 +171,19 @@ func (c *JikanClient) GetFullAnime(malID int) (*JikanAnimeResponse, error) {
 	}
 
 	return &animeResponse, nil
+}
+
+// makeRequestWithCurl uses curl as a fallback when Go HTTP client fails
+func (c *JikanClient) makeRequestWithCurl(url string) ([]byte, error) {
+	c.WaitForRateLimit()
+
+	cmd := exec.Command("curl", "-s", "-H", "Accept: application/json", url)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("curl command failed: %w", err)
+	}
+
+	return output, nil
 }
 
 // GetAnimeEpisodes fetches all episodes for an anime by MAL ID
