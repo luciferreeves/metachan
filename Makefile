@@ -15,6 +15,7 @@ endef
 setup:
 	@echo "Setting up environment..."
 	@go mod download
+	@go mod tidy
 	@if [ ! -f $(ENV_PATH) ]; then cp .env.example $(ENV_PATH); fi
 	@echo "Environment setup complete."
 
