@@ -1,0 +1,795 @@
+openapi: 3.0.3
+info:
+  title: Metachan API
+  description: |
+    > **CAUTION**: I _do not_ provide pre-hosted instances of the MetaChan API. You will need to host your own instance of the API to use it. MetaChan is provided on an "as-is" basis and fetches data from various public sources and projects, some of which may have rate limits, restrictions, and even contain pirated content. The API is intended for personal use only and should not be used for commercial purposes. I do not take any responsibility for any legal issues that may arise from using the API. Please use it at your own risk. I _do not_ condone piracy or illegal distribution of content.
+
+    
+    # MetaChan
+    ![MetaChan](https://i.redd.it/rg4mpacfm1wz.png)
+    Welcome to **MetaChan**. MetaChan is an Anime and Manga metadata API that provides a RESTful interface for accessing metadata for various anime and manga titles. MetaChan best integrates with [MyAnimeList](https://myanimelist.net/) and uses **MAL IDs** as the primary identifier for anime and manga titles. [AniList](https://anilist.co/) is also supported partially and will reverse lookup MAL IDs.
+    
+  version: 1.0.0
+  contact:
+    name: API Support
+    url: https://github.com/luciferreeves/metachan
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+tags:
+  - name: health
+    description: Health check and system status endpoints
+  - name: anime
+    description: Anime information endpoints
+  - name: episodes
+    description: Episode-specific endpoints
+  - name: characters
+    description: Character and voice actor endpoints
+
+paths:
+  /health:
+    get:
+      tags:
+        - health
+      summary: Get system health status
+      description: Returns the current health status of the API including memory usage, database status, and running tasks
+      operationId: getHealth
+      responses:
+        '200':
+          description: Successful response with health status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+              example:
+                $ref: './data.json#/health'
+
+  /a/{id}:
+    get:
+      tags:
+        - anime
+      summary: Get anime details
+      description: |
+        Retrieves comprehensive information about an anime including metadata, episodes, characters, and streaming details.
+        
+        Supports both MyAnimeList (MAL) IDs and AniList IDs via the `provider` query parameter.
+        - **Default**: Uses MAL ID
+        - **With provider=anilist**: Uses AniList ID and reverse lookups MAL ID
+      operationId: getAnime
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The anime ID (MAL ID by default, or AniList ID when provider=anilist)
+          schema:
+            type: integer
+            example: 1
+        - name: provider
+          in: query
+          required: false
+          description: The ID provider type. Omit for MAL ID, use 'anilist' for AniList ID
+          schema:
+            type: string
+            enum: [anilist]
+            example: anilist
+      responses:
+        '200':
+          description: Successful response with anime details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Anime'
+              example:
+                $ref: './data.json#/a~1id'
+        '400':
+          description: Bad request - Invalid or missing ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Query parameter MAL ID is required"
+        '404':
+          description: Anime not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Anime mapping not found"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Failed to fetch anime details"
+
+  /a/{id}/episodes:
+    get:
+      tags:
+        - episodes
+      summary: Get all episodes for an anime
+      description: |
+        Retrieves a list of all episodes for the specified anime, including metadata like titles, air dates, scores, and episode counts.
+        
+        The response includes both individual episode data and aggregate statistics (total, aired, subbed, dubbed counts).
+        
+        Supports both MyAnimeList (MAL) IDs and AniList IDs via the `provider` query parameter.
+      operationId: getAnimeEpisodes
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The anime ID (MAL ID by default, or AniList ID when provider=anilist)
+          schema:
+            type: integer
+            example: 1
+        - name: provider
+          in: query
+          required: false
+          description: The ID provider type. Omit for MAL ID, use 'anilist' for AniList ID
+          schema:
+            type: string
+            enum: [anilist]
+      responses:
+        '200':
+          description: Successful response with episodes list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnimeEpisodes'
+              example:
+                $ref: './data.json#/a~1id~1episodes'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Anime not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /a/{id}/episodes/{episodeId}:
+    get:
+      tags:
+        - episodes
+      summary: Get single episode details
+      description: |
+        Retrieves detailed information about a specific episode including:
+        - Episode metadata (titles, description, air date, scores)
+        - Streaming sources for both subbed and dubbed versions
+        - Filler/recap indicators
+        
+        Streaming data is cached for 7 days to improve performance.
+        
+        Supports both MyAnimeList (MAL) IDs and AniList IDs via the `provider` query parameter.
+      operationId: getAnimeEpisode
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The anime ID (MAL ID by default, or AniList ID when provider=anilist)
+          schema:
+            type: integer
+            example: 1
+        - name: episodeId
+          in: path
+          required: true
+          description: The unique episode ID (hash generated from episode titles)
+          schema:
+            type: string
+            example: "a1b2c3d4e5f6"
+        - name: provider
+          in: query
+          required: false
+          description: The ID provider type. Omit for MAL ID, use 'anilist' for AniList ID
+          schema:
+            type: string
+            enum: [anilist]
+      responses:
+        '200':
+          description: Successful response with episode details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnimeSingleEpisode'
+              example:
+                $ref: './data.json#/a~1id~1episodes~1episodeid'
+        '400':
+          description: Bad request - Invalid or missing parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Episode ID is required"
+        '404':
+          description: Episode not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error: "Episode not found"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /a/{id}/characters:
+    get:
+      tags:
+        - characters
+      summary: Get anime characters
+      description: |
+        Retrieves a list of characters for the specified anime, including:
+        - Character information (name, image, role)
+        - Voice actors for each character
+        - Voice actor languages
+        
+        Supports both MyAnimeList (MAL) IDs and AniList IDs via the `provider` query parameter.
+      operationId: getAnimeCharacters
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The anime ID (MAL ID by default, or AniList ID when provider=anilist)
+          schema:
+            type: integer
+            example: 1
+        - name: provider
+          in: query
+          required: false
+          description: The ID provider type. Omit for MAL ID, use 'anilist' for AniList ID
+          schema:
+            type: string
+            enum: [anilist]
+      responses:
+        '200':
+          description: Successful response with characters list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AnimeCharacter'
+              example:
+                $ref: './data.json#/a~1id~1characters'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Anime not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    Error:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Error message describing what went wrong
+          example: "Resource not found"
+
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          example: "healthy"
+        timestamp:
+          type: string
+          format: date-time
+        uptime:
+          type: string
+          example: "2h 30m 15s"
+        memory:
+          $ref: '#/components/schemas/MemoryStats'
+        database:
+          $ref: '#/components/schemas/DatabaseStatus'
+        tasks:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/TaskStatus'
+
+    MemoryStats:
+      type: object
+      properties:
+        used:
+          type: string
+          example: "256 MB"
+        total:
+          type: string
+          example: "512 MB"
+        free:
+          type: string
+          example: "256 MB"
+        usage:
+          type: string
+          example: "50.00%"
+
+    DatabaseStatus:
+      type: object
+      properties:
+        connected:
+          type: boolean
+        last_checked:
+          type: string
+          format: date-time
+
+    TaskStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [idle, running, completed, failed]
+        last_run:
+          type: string
+          format: date-time
+        next_run:
+          type: string
+          format: date-time
+
+    AnimeTitles:
+      type: object
+      properties:
+        english:
+          type: string
+          example: "Cowboy Bebop"
+        japanese:
+          type: string
+          example: "カウボーイビバップ"
+        romaji:
+          type: string
+          example: "Cowboy Bebop"
+        synonyms:
+          type: array
+          items:
+            type: string
+
+    AnimeImages:
+      type: object
+      properties:
+        small:
+          type: string
+          format: uri
+        large:
+          type: string
+          format: uri
+        original:
+          type: string
+          format: uri
+
+    AnimeLogos:
+      type: object
+      properties:
+        small:
+          type: string
+          format: uri
+        medium:
+          type: string
+          format: uri
+        large:
+          type: string
+          format: uri
+        xlarge:
+          type: string
+          format: uri
+        original:
+          type: string
+          format: uri
+
+    AnimeScores:
+      type: object
+      properties:
+        score:
+          type: number
+          format: float
+          example: 8.75
+        scored_by:
+          type: integer
+          example: 150000
+        rank:
+          type: integer
+          example: 42
+        popularity:
+          type: integer
+          example: 150
+        members:
+          type: integer
+          example: 500000
+        favorites:
+          type: integer
+          example: 25000
+
+    AiringStatus:
+      type: object
+      properties:
+        from:
+          $ref: '#/components/schemas/AiringDate'
+        to:
+          $ref: '#/components/schemas/AiringDate'
+        string:
+          type: string
+          example: "Apr 3, 1998 to Apr 24, 1999"
+
+    AiringDate:
+      type: object
+      properties:
+        day:
+          type: integer
+        month:
+          type: integer
+        year:
+          type: integer
+        string:
+          type: string
+
+    AnimeBroadcast:
+      type: object
+      properties:
+        day:
+          type: string
+          example: "Saturdays"
+        time:
+          type: string
+          example: "01:00"
+        timezone:
+          type: string
+          example: "JST"
+        string:
+          type: string
+          example: "Saturdays at 01:00 (JST)"
+
+    AnimeGenres:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "Action"
+        genre_id:
+          type: integer
+        url:
+          type: string
+          format: uri
+
+    AnimeProducer:
+      type: object
+      properties:
+        name:
+          type: string
+        producer_id:
+          type: integer
+        url:
+          type: string
+          format: uri
+
+    AnimeStudio:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "Sunrise"
+        studio_id:
+          type: integer
+        url:
+          type: string
+          format: uri
+
+    AnimeLicensor:
+      type: object
+      properties:
+        name:
+          type: string
+        producer_id:
+          type: integer
+        url:
+          type: string
+          format: uri
+
+    AnimeMappings:
+      type: object
+      description: External database IDs for cross-referencing
+      properties:
+        anidb:
+          type: integer
+        anilist:
+          type: integer
+        anime_countdown:
+          type: integer
+        anime_planet:
+          type: string
+        ani_search:
+          type: integer
+        imdb:
+          type: string
+        kitsu:
+          type: integer
+        live_chart:
+          type: integer
+        notify_moe:
+          type: string
+        simkl:
+          type: integer
+        tmdb:
+          type: integer
+        tvdb:
+          type: integer
+
+    AnimeAiringEpisode:
+      type: object
+      properties:
+        airing_at:
+          type: integer
+          description: Unix timestamp
+        episode:
+          type: integer
+
+    EpisodeTitles:
+      type: object
+      properties:
+        english:
+          type: string
+        japanese:
+          type: string
+        romaji:
+          type: string
+
+    AnimeStreamingSource:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Direct streaming URL
+        server:
+          type: string
+          description: Server/provider name
+          example: "Maria"
+        type:
+          type: string
+          enum: [HLS, MP4]
+          description: Type of streaming link
+
+    AnimeStreaming:
+      type: object
+      properties:
+        sub:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnimeStreamingSource'
+        dub:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnimeStreamingSource'
+
+    AnimeSingleEpisode:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique episode identifier (hash)
+        titles:
+          $ref: '#/components/schemas/EpisodeTitles'
+        description:
+          type: string
+        aired:
+          type: string
+        score:
+          type: number
+          format: float
+        filler:
+          type: boolean
+        recap:
+          type: boolean
+        forum_url:
+          type: string
+          format: uri
+        url:
+          type: string
+          format: uri
+        thumbnail_url:
+          type: string
+          format: uri
+        streaming:
+          $ref: '#/components/schemas/AnimeStreaming'
+
+    AnimeEpisodes:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of episodes
+        aired:
+          type: integer
+          description: Number of aired episodes
+        subbed:
+          type: integer
+          description: Number of subbed episodes available
+        dubbed:
+          type: integer
+          description: Number of dubbed episodes available
+        episodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnimeSingleEpisode'
+
+    AnimeVoiceActor:
+      type: object
+      properties:
+        id:
+          type: integer
+        url:
+          type: string
+          format: uri
+        image_url:
+          type: string
+          format: uri
+        name:
+          type: string
+        language:
+          type: string
+          example: "Japanese"
+
+    AnimeCharacter:
+      type: object
+      properties:
+        id:
+          type: integer
+        url:
+          type: string
+          format: uri
+        image_url:
+          type: string
+          format: uri
+        name:
+          type: string
+        role:
+          type: string
+          enum: [Main, Supporting]
+        voice_actors:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnimeVoiceActor'
+
+    AnimeSeason:
+      type: object
+      properties:
+        id:
+          type: integer
+        titles:
+          $ref: '#/components/schemas/AnimeTitles'
+        synopsis:
+          type: string
+        type:
+          type: string
+          enum: [TV, OVA, Movie, Special, ONA, Music]
+        source:
+          type: string
+        airing:
+          type: boolean
+        status:
+          type: string
+          enum: [Finished Airing, Currently Airing, Not yet aired]
+        airing_status:
+          $ref: '#/components/schemas/AiringStatus'
+        duration:
+          type: string
+        images:
+          $ref: '#/components/schemas/AnimeImages'
+        scores:
+          $ref: '#/components/schemas/AnimeScores'
+        season:
+          type: string
+          enum: [winter, spring, summer, fall]
+        year:
+          type: integer
+        current:
+          type: boolean
+
+    Anime:
+      type: object
+      properties:
+        id:
+          type: integer
+          description: MyAnimeList ID
+        titles:
+          $ref: '#/components/schemas/AnimeTitles'
+        synopsis:
+          type: string
+        type:
+          type: string
+          enum: [TV, OVA, Movie, Special, ONA, Music]
+        source:
+          type: string
+        airing:
+          type: boolean
+        status:
+          type: string
+          enum: [Finished Airing, Currently Airing, Not yet aired]
+        airing_status:
+          $ref: '#/components/schemas/AiringStatus'
+        duration:
+          type: string
+        images:
+          $ref: '#/components/schemas/AnimeImages'
+        logos:
+          $ref: '#/components/schemas/AnimeLogos'
+        covers:
+          $ref: '#/components/schemas/AnimeImages'
+        color:
+          type: string
+          description: Hex color code
+        genres:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnimeGenres'
+        scores:
+          $ref: '#/components/schemas/AnimeScores'
+        season:
+          type: string
+          enum: [winter, spring, summer, fall]
+        year:
+          type: integer
+        broadcast:
+          $ref: '#/components/schemas/AnimeBroadcast'
+        producers:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnimeProducer'
+        studios:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnimeStudio'
+        licensors:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnimeLicensor'
+        seasons:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnimeSeason'
+        episodes:
+          $ref: '#/components/schemas/AnimeEpisodes'
+        next_airing_episode:
+          $ref: '#/components/schemas/AnimeAiringEpisode'
+        airing_schedule:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnimeAiringEpisode'
+        characters:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnimeCharacter'
+        mappings:
+          $ref: '#/components/schemas/AnimeMappings'
