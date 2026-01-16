@@ -47,7 +47,7 @@ func getMessageColor(level LogLevel) string {
 	}
 }
 
-func Log(message interface{}, options LogOptions) {
+func Log(message any, options LogOptions) {
 	var builder strings.Builder
 
 	if options.Timestamp {
@@ -85,7 +85,7 @@ func Log(message interface{}, options LogOptions) {
 	case string:
 		builder.WriteString(msg)
 	default:
-		builder.WriteString(fmt.Sprintf("%v", msg))
+		fmt.Fprintf(&builder, "%v", msg)
 	}
 
 	builder.WriteString(Reset)
