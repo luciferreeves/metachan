@@ -14,6 +14,19 @@ type JikanGenericMALStructure struct {
 	Name  string `json:"name"`
 }
 
+// JikanGenre represents a genre from Jikan genres API
+type JikanGenre struct {
+	MALID int    `json:"mal_id"`
+	Name  string `json:"name"`
+	URL   string `json:"url"`
+	Count int    `json:"count"`
+}
+
+// JikanGenresResponse represents the genres response from Jikan API
+type JikanGenresResponse struct {
+	Data []JikanGenre `json:"data"`
+}
+
 // JikanAnimeResponse represents the main anime response from Jikan API
 type JikanAnimeResponse struct {
 	Data struct {

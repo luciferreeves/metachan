@@ -47,4 +47,18 @@ func init() {
 			Prefix: "TaskManager",
 		})
 	}
+
+	// Register GenreSync task (every 7 days)
+	err = GlobalTaskManager.RegisterTask(types.Task{
+		Name:     "GenreSync",
+		Interval: 7 * 24 * time.Hour,
+		Execute:  GenreSync,
+	})
+
+	if err != nil {
+		logger.Log(fmt.Sprintf("Failed to register GenreSync task: %v", err), logger.LogOptions{
+			Level:  logger.Error,
+			Prefix: "TaskManager",
+		})
+	}
 }

@@ -170,15 +170,35 @@ func SaveAnimeToDatabase(animeData *types.Anime) error {
 		}
 	}
 
-	// Save genres
+	// Save genres - link to master genres instead of creating duplicates
 	if len(animeData.Genres) > 0 {
-		anime.Genres = make([]entities.AnimeGenre, len(animeData.Genres))
-		for i, genre := range animeData.Genres {
-			anime.Genres[i] = entities.AnimeGenre{
+		anime.Genres = make([]entities.AnimeGenre, 0, len(animeData.Genres))
+		for _, genre := range animeData.Genres {
+			// Check if master genre exists
+			var masterGenre entities.AnimeGenre
+			err := DB.Where("genre_id = ? AND anime_id = 0", genre.GenreID).First(&masterGenre).Error
+
+			// Create anime-specific genre link
+			animeGenre := entities.AnimeGenre{
 				Name:    genre.Name,
 				GenreID: genre.GenreID,
 				URL:     genre.URL,
+				Count:   0, // Count is only for master genres
 			}
+
+			// If master genre doesn't exist, the link will still work
+			// Genre sync will create the master genre later
+			if err != nil {
+				// Master genre doesn't exist yet, that's okay
+				animeGenre.Name = genre.Name
+				animeGenre.URL = genre.URL
+			} else {
+				// Use data from master genre for consistency
+				animeGenre.Name = masterGenre.Name
+				animeGenre.URL = masterGenre.URL
+			}
+
+			anime.Genres = append(anime.Genres, animeGenre)
 		}
 	}
 
@@ -718,6 +738,32 @@ func GetEpisodeStreaming(episodeID string, animeID uint) (*entities.EpisodeStrea
 	}
 
 	return &streaming, nil
+}
+
+// GetAllGenres retrieves all master genres (AnimeID = 0) with MAL counts
+func GetAllGenres() ([]map[string]interface{}, error) {
+	var results []entities.AnimeGenre
+
+	err := DB.Where("anime_id = 0").
+		Order("count DESC, name ASC").
+		Find(&results).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to map format
+	genres := make([]map[string]interface{}, len(results))
+	for i, r := range results {
+		genres[i] = map[string]interface{}{
+			"id":    r.GenreID,
+			"name":  r.Name,
+			"url":   r.URL,
+			"count": r.Count,
+		}
+	}
+
+	return genres, nil
 }
 
 // SaveEpisodeStreaming saves streaming data to the database

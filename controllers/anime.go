@@ -161,3 +161,21 @@ func getAnimeMapping(c *fiber.Ctx) (*entities.AnimeMapping, error) {
 
 	return mapping, nil
 }
+
+// GetGenres retrieves all genres from the database
+func GetGenres(c *fiber.Ctx) error {
+	genres, err := database.GetAllGenres()
+	if err != nil {
+		logger.Log("Failed to get genres: "+err.Error(), logger.LogOptions{
+			Level:  logger.Error,
+			Prefix: "Controller",
+		})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to retrieve genres",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"genres": genres,
+	})
+}

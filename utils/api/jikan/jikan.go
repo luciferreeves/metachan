@@ -260,3 +260,23 @@ func (c *JikanClient) GetAnimeCharacters(malID int) (*JikanAnimeCharacterRespons
 
 	return &characterResponse, nil
 }
+
+// GetAnimeGenres fetches all anime genres from MAL
+func (c *JikanClient) GetAnimeGenres() (*JikanGenresResponse, error) {
+	apiURL := "https://api.jikan.moe/v4/genres/anime"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	bodyBytes, err := c.makeRequest(ctx, apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get anime genres: %w", err)
+	}
+
+	var genresResponse JikanGenresResponse
+	if err := json.Unmarshal(bodyBytes, &genresResponse); err != nil {
+		return nil, fmt.Errorf("failed to decode genres response: %w", err)
+	}
+
+	return &genresResponse, nil
+}
