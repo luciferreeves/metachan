@@ -52,3 +52,30 @@ type TMDBShowDetails struct {
 		AirDate      string `json:"air_date"`
 	} `json:"seasons"`
 }
+
+// TMDBMovieResult represents a movie result from TMDB search
+type TMDBMovieResult struct {
+	ID          int    `json:"id"`
+	Title       string `json:"title"`
+	ReleaseDate string `json:"release_date"`
+	Adult       bool   `json:"adult"`
+}
+
+// TMDBMovieSearchResponse represents the response from TMDB movie search API
+type TMDBMovieSearchResponse struct {
+	Page         int               `json:"page"`
+	Results      []TMDBMovieResult `json:"results"`
+	TotalPages   int               `json:"total_pages"`
+	TotalResults int               `json:"total_results"`
+}
+
+// TMDBMovieDetails represents a movie from TMDB
+type TMDBMovieDetails struct {
+	ID           int    `json:"id"`
+	Title        string `json:"title"`
+	Overview     string `json:"overview"`
+	PosterPath   string `json:"poster_path"`
+	BackdropPath string `json:"backdrop_path"`
+	ReleaseDate  string `json:"release_date"`
+	Runtime      int    `json:"runtime"`
+}

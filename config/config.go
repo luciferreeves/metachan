@@ -29,6 +29,9 @@ func init() {
 			APIKey:          getEnv("TMDB_API_KEY"),
 			ReadAccessToken: getEnv("TMDB_READ_ACCESS_TOKEN"),
 		},
+		TVDB: types.TVDBConfig{
+			APIKey: getEnv("TVDB_API_KEY"),
+		},
 	}
 
 	switch Config.DatabaseDriver {
@@ -51,6 +54,10 @@ func init() {
 
 	if Config.TMDB.ReadAccessToken == "" {
 		logger.Log("Invalid TMDB read access token or TMDB read access token not set", logOptions)
+	}
+
+	if Config.TVDB.APIKey == "" {
+		logger.Log("Invalid TVDB API key or TVDB API key not set", logOptions)
 	}
 
 	logOptions.Level = logger.Success

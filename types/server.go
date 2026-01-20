@@ -14,9 +14,14 @@ type TMDBConfig struct {
 	ReadAccessToken string
 }
 
+type TVDBConfig struct {
+	APIKey string
+}
+
 type ServerConfig struct {
 	DatabaseDriver DatabaseDriver
 	DataSourceName string
 	Port           int
 	TMDB           TMDBConfig
+	TVDB           TVDBConfig
 }

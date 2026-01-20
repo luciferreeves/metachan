@@ -9,7 +9,7 @@ import (
 	"metachan/utils/api/jikan"
 	"metachan/utils/api/malsync"
 	"metachan/utils/api/tmdb"
-	api "metachan/utils/api/tvdb"
+	"metachan/utils/api/tvdb"
 	"metachan/utils/logger"
 	"net/http"
 	"strings"
@@ -551,4 +551,4 @@ func extractCrunchyrollSeriesID(crURL string) string {
 }
 
 // FindSeasonMappings finds all anime mappings that belong to the same series based on TVDB ID
-var FindSeasonMappings = api.FindSeasonMappings
+var FindSeasonMappings = tvdb.FindSeasonMappings

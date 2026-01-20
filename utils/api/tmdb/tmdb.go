@@ -1,6 +1,7 @@
 package tmdb
 
 import (
+	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -523,4 +524,206 @@ func AttachEpisodeDescriptions(title string, episodes []types.AnimeSingleEpisode
 	})
 
 	return enrichedEpisodes, nil
+}
+
+// searchMoviesByTitle searches for movies on TMDB by title
+func searchMoviesByTitle(title string, alternativeTitle string) ([]TMDBMovieResult, error) {
+	if config.Config.TMDB.ReadAccessToken == "" {
+		return nil, fmt.Errorf("TMDB is not initialized")
+	}
+
+	query := normalizeTitle(title)
+	if query == "" && alternativeTitle != "" {
+		query = normalizeTitle(alternativeTitle)
+	}
+
+	logger.Log(fmt.Sprintf("Searching TMDB for movie: %s", query), logger.LogOptions{
+		Level:  logger.Debug,
+		Prefix: "TMDB",
+	})
+
+	apiURL := "https://api.themoviedb.org/3/search/movie"
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	q := req.URL.Query()
+	q.Add("query", query)
+	req.URL.RawQuery = q.Encode()
+
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.Config.TMDB.ReadAccessToken))
+	req.Header.Add("Accept", "application/json")
+
+	resp, err := makeSimpleRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search movies: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("search failed with status: %d", resp.StatusCode)
+	}
+
+	var searchResp TMDBMovieSearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	logger.Log(fmt.Sprintf("Found %d movie results for: %s", len(searchResp.Results), query), logger.LogOptions{
+		Level:  logger.Debug,
+		Prefix: "TMDB",
+	})
+
+	return searchResp.Results, nil
+}
+
+// getMovieDetails fetches details for a specific movie
+func getMovieDetails(movieID int) (*TMDBMovieDetails, error) {
+	if config.Config.TMDB.ReadAccessToken == "" {
+		return nil, fmt.Errorf("TMDB is not initialized")
+	}
+
+	apiURL := fmt.Sprintf("https://api.themoviedb.org/3/movie/%d", movieID)
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.Config.TMDB.ReadAccessToken))
+	req.Header.Add("Accept", "application/json")
+
+	resp, err := makeSimpleRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch movie details: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("request failed with status: %d", resp.StatusCode)
+	}
+
+	var movieDetails TMDBMovieDetails
+	if err := json.NewDecoder(resp.Body).Decode(&movieDetails); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &movieDetails, nil
+}
+
+// GetMovieAsEpisode fetches movie details and returns it as a single episode
+func GetMovieAsEpisode(title string, alternativeTitle string, tmdbID int, malID int, japaneseTitle string, animeScore float64) ([]types.AnimeSingleEpisode, error) {
+	logger.Log(fmt.Sprintf("Fetching movie episode data for: %s", title), logger.LogOptions{
+		Level:  logger.Debug,
+		Prefix: "TMDB",
+	})
+
+	var movieID int
+	var err error
+
+	// If TMDB ID is provided, use it directly
+	if tmdbID > 0 {
+		movieID = tmdbID
+		logger.Log(fmt.Sprintf("Using provided TMDB movie ID: %d", movieID), logger.LogOptions{
+			Level:  logger.Debug,
+			Prefix: "TMDB",
+		})
+	} else {
+		// Search for the movie
+		movies, err := searchMoviesByTitle(title, alternativeTitle)
+		if err != nil || len(movies) == 0 {
+			logger.Log(fmt.Sprintf("Failed to find movie on TMDB: %v", err), logger.LogOptions{
+				Level:  logger.Warn,
+				Prefix: "TMDB",
+			})
+			return nil, fmt.Errorf("movie not found on TMDB")
+		}
+
+		// Use the first result
+		movieID = movies[0].ID
+		logger.Log(fmt.Sprintf("Found TMDB movie ID: %d for title: %s", movieID, title), logger.LogOptions{
+			Level:  logger.Debug,
+			Prefix: "TMDB",
+		})
+	}
+
+	// Get movie details
+	movieDetails, err := getMovieDetails(movieID)
+	if err != nil {
+		logger.Log(fmt.Sprintf("Failed to fetch movie details: %v", err), logger.LogOptions{
+			Level:  logger.Warn,
+			Prefix: "TMDB",
+		})
+		return nil, err
+	}
+
+	// Convert movie to a single episode format
+	const tmdbImageBaseURL = "https://image.tmdb.org/t/p/"
+	const backdropSize = "w780"
+
+	backdropURL := ""
+	if movieDetails.BackdropPath != "" {
+		backdropURL = tmdbImageBaseURL + backdropSize + movieDetails.BackdropPath
+	} else if movieDetails.PosterPath != "" {
+		backdropURL = tmdbImageBaseURL + backdropSize + movieDetails.PosterPath
+	}
+
+	description := movieDetails.Overview
+	if description == "" {
+		description = "No description available"
+	}
+
+	// Create titles structure with English title from TMDB and Japanese/Romaji from MAL
+	titles := types.EpisodeTitles{
+		English:  movieDetails.Title,
+		Japanese: japaneseTitle,
+		Romaji:   title,
+	}
+
+	// Calculate score out of 5 (half of MAL score out of 10), rounded to 2 decimal points
+	movieScore := float64(int((animeScore/2.0)*100)) / 100
+
+	// Generate MAL URLs
+	malURL := ""
+	forumURL := ""
+	if malID > 0 {
+		malURL = fmt.Sprintf("https://myanimelist.net/anime/%d", malID)
+		forumURL = fmt.Sprintf("https://myanimelist.net/anime/%d/forum", malID)
+	}
+
+	episode := types.AnimeSingleEpisode{
+		ID:           generateEpisodeID(titles),
+		Titles:       titles,
+		Description:  description,
+		ThumbnailURL: backdropURL,
+		Aired:        movieDetails.ReleaseDate,
+		Score:        movieScore,
+		Filler:       false,
+		Recap:        false,
+		ForumURL:     forumURL,
+		URL:          malURL,
+	}
+
+	logger.Log(fmt.Sprintf("Successfully created episode from movie: %s", title), logger.LogOptions{
+		Level:  logger.Success,
+		Prefix: "TMDB",
+	})
+
+	return []types.AnimeSingleEpisode{episode}, nil
+}
+
+// generateEpisodeID creates a unique episode ID from titles
+func generateEpisodeID(titles types.EpisodeTitles) string {
+	var title string
+	if titles.English != "" {
+		title = titles.English
+	} else if titles.Romaji != "" {
+		title = titles.Romaji
+	} else {
+		title = titles.Japanese
+	}
+
+	// MD5 hash for ID generation to match Jikan episode IDs
+	hash := md5.Sum([]byte(title))
+	return fmt.Sprintf("%x", hash)
 }

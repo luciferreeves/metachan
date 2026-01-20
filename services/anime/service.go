@@ -9,6 +9,8 @@ import (
 	"metachan/utils/api/jikan"
 	"metachan/utils/api/malsync"
 	"metachan/utils/api/streaming"
+	"metachan/utils/api/tmdb"
+	"metachan/utils/api/tvdb"
 	"metachan/utils/concurrency"
 	"metachan/utils/logger"
 	"strings"
@@ -198,20 +200,92 @@ func (s *Service) GetAnimeDetailsWithSource(mapping *entities.AnimeMapping, sour
 		defer close(dubbedCountChan)
 		defer close(tmdbErrorChan)
 
-		basicEpisodes := generateBasicEpisodes(episodes.Data)
-		logger.Log(fmt.Sprintf("Generated basic episodes: %d", len(basicEpisodes)), logger.LogOptions{
-			Level:  logger.Debug,
-			Prefix: "AnimeAPI",
-		})
+		var enrichedEpisodes []types.AnimeSingleEpisode
+		var tmdbErr error
 
-		// Enrich episodes with TMDB data
-		logger.Log(fmt.Sprintf("Starting enrichEpisodes for %d episodes", len(basicEpisodes)), logger.LogOptions{
-			Level:  logger.Debug,
-			Prefix: "AnimeAPI",
-		})
-		enrichStart := time.Now()
+		// Check anime type - use different sources for movies vs TV shows
+		animeType := string(mapping.Type)
 
-		enrichedEpisodes, tmdbErr := AttachEpisodeDescriptions(anime.Data.Title, basicEpisodes, anime.Data.TitleEnglish, mapping.TMDB)
+		if (animeType == "MOVIE" || animeType == "Movie") && mapping.TMDB != 0 {
+			// For movies with TMDB mapping, use TMDB to get movie details as a single episode
+			logger.Log(fmt.Sprintf("Detected movie type with TMDB ID %d, fetching from TMDB for: %s", mapping.TMDB, anime.Data.Title), logger.LogOptions{
+				Level:  logger.Debug,
+				Prefix: "AnimeAPI",
+			})
+
+			enrichedEpisodes, tmdbErr = tmdb.GetMovieAsEpisode(
+				anime.Data.Title,
+				anime.Data.TitleEnglish,
+				mapping.TMDB,
+				anime.Data.MALID,
+				anime.Data.TitleJapanese,
+				anime.Data.Score,
+			)
+			if tmdbErr != nil {
+				logger.Log(fmt.Sprintf("Failed to get movie from TMDB: %v, falling back to basic episode", tmdbErr), logger.LogOptions{
+					Level:  logger.Warn,
+					Prefix: "AnimeAPI",
+				})
+				// Fallback to basic episode generation
+				basicEpisodes := generateBasicEpisodes(episodes.Data)
+				enrichedEpisodes = basicEpisodes
+			}
+		} else {
+			// For TV shows, prefer TVDB over TMDB
+			var usedfallback bool
+
+			if mapping.TVDB != 0 {
+				// Try TVDB first for TV shows
+				logger.Log(fmt.Sprintf("Using TVDB for TV show episodes (TVDB ID: %d)", mapping.TVDB), logger.LogOptions{
+					Level:  logger.Debug,
+					Prefix: "AnimeAPI",
+				})
+
+				tvdbEpisodes, tvdbErr := tvdb.GetSeriesEpisodes(mapping.TVDB)
+				if tvdbErr == nil && len(tvdbEpisodes) > 0 {
+					enrichedEpisodes = tvdb.ConvertTVDBEpisodesToAnimeEpisodes(tvdbEpisodes)
+					logger.Log(fmt.Sprintf("Successfully fetched %d episodes from TVDB", len(enrichedEpisodes)), logger.LogOptions{
+						Level:  logger.Success,
+						Prefix: "TVDB",
+					})
+				} else {
+					logger.Log(fmt.Sprintf("TVDB fetch failed or returned no episodes: %v, falling back to TMDB", tvdbErr), logger.LogOptions{
+						Level:  logger.Warn,
+						Prefix: "TVDB",
+					})
+					usedfallback = true
+				}
+			} else {
+				logger.Log("No TVDB ID available, using TMDB for episodes", logger.LogOptions{
+					Level:  logger.Debug,
+					Prefix: "AnimeAPI",
+				})
+				usedfallback = true
+			}
+
+			// Fallback to TMDB if TVDB failed or wasn't available
+			if usedfallback {
+				basicEpisodes := generateBasicEpisodes(episodes.Data)
+				logger.Log(fmt.Sprintf("Generated basic episodes: %d", len(basicEpisodes)), logger.LogOptions{
+					Level:  logger.Debug,
+					Prefix: "AnimeAPI",
+				})
+
+				logger.Log(fmt.Sprintf("Starting TMDB enrichment for %d episodes", len(basicEpisodes)), logger.LogOptions{
+					Level:  logger.Debug,
+					Prefix: "AnimeAPI",
+				})
+				enrichStart := time.Now()
+
+				enrichedEpisodes, tmdbErr = AttachEpisodeDescriptions(anime.Data.Title, basicEpisodes, anime.Data.TitleEnglish, mapping.TMDB)
+
+				logger.Log(fmt.Sprintf("TMDB enrichment execution time: %s", time.Since(enrichStart)), logger.LogOptions{
+					Level:  logger.Debug,
+					Prefix: "AnimeAPI",
+				})
+			}
+		}
+
 		tmdbErrorChan <- tmdbErr
 
 		// Get subbed and dubbed episode counts in bulk with a single API call (much faster)
@@ -252,11 +326,6 @@ func (s *Service) GetAnimeDetailsWithSource(mapping *entities.AnimeMapping, sour
 			Prefix: "AnimeAPI",
 		})
 
-		logger.Log(fmt.Sprintf("enrichEpisodes execution time: %s", time.Since(enrichStart)), logger.LogOptions{
-			Level:  logger.Debug,
-			Prefix: "AnimeAPI",
-		})
-
 		episodeDataChan <- enrichedEpisodes
 		subbedCountChan <- subCount
 		dubbedCountChan <- dubCount
@@ -270,7 +339,7 @@ func (s *Service) GetAnimeDetailsWithSource(mapping *entities.AnimeMapping, sour
 			Level:  logger.Debug,
 			Prefix: "TVDB",
 		})
-		seasonMappings, err := FindSeasonMappings(mapping.TVDB)
+		seasonMappings, err := tvdb.FindSeasonMappings(mapping.TVDB)
 		if err == nil && len(seasonMappings) > 0 {
 			logger.Log(fmt.Sprintf("Found %d season mappings for TVDB ID %d", len(seasonMappings), mapping.TVDB), logger.LogOptions{
 				Level:  logger.Debug,
