@@ -20,15 +20,44 @@ func init() {
 		Database: database.DB,
 	}
 
-	// Register AniSync task (weekly)
+	// Register AniFetch task (weekly) - fetches anime mappings from Fribb list
 	err := GlobalTaskManager.RegisterTask(types.Task{
-		Name:     "AnimeSync",
+		Name:     "AnimeFetch",
 		Interval: 7 * 24 * time.Hour,
+		Execute: func() error {
+			// Run AniFetch first
+			if err := AniFetch(); err != nil {
+				return err
+			}
+			// After AniFetch completes, trigger AniSync in background
+			go func() {
+				if err := AniSync(); err != nil {
+					logger.Log(fmt.Sprintf("AniSync failed: %v", err), logger.LogOptions{
+						Level:  logger.Error,
+						Prefix: "TaskManager",
+					})
+				}
+			}()
+			return nil
+		},
+	})
+
+	if err != nil {
+		logger.Log(fmt.Sprintf("Failed to register AnimeFetch task: %v", err), logger.LogOptions{
+			Level:  logger.Error,
+			Prefix: "TaskManager",
+		})
+	}
+
+	// Register AnimeSync task (triggered automatically after AnimeFetch completes)
+	err = GlobalTaskManager.RegisterTask(types.Task{
+		Name:     "AnimeSync",
+		Interval: 0, // No scheduled interval - runs after AnimeFetch
 		Execute:  AniSync,
 	})
 
 	if err != nil {
-		logger.Log(fmt.Sprintf("Failed to register AniSync task: %v", err), logger.LogOptions{
+		logger.Log(fmt.Sprintf("Failed to register AnimeSync task: %v", err), logger.LogOptions{
 			Level:  logger.Error,
 			Prefix: "TaskManager",
 		})
