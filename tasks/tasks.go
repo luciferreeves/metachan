@@ -57,9 +57,10 @@ func init() {
 
 	// Register AnimeSync task (triggered automatically after AnimeFetch completes)
 	err = GlobalTaskManager.RegisterTask(types.Task{
-		Name:     "AnimeSync",
-		Interval: 7 * 24 * time.Hour, // Same interval as AnimeFetch
-		Execute:  AniSync,
+		Name:        "AnimeSync",
+		Interval:    0, // Manual-only - runs after AnimeFetch
+		Execute:     AniSync,
+		TriggeredBy: "AnimeFetch",
 	})
 
 	if err != nil {

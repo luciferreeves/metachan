@@ -277,6 +277,15 @@ func (tm *TaskManager) GetTaskStatus(taskName string) *types.TaskStatus {
 		if task.Interval > 0 {
 			next := logEntry.ExecutedAt.Add(task.Interval)
 			nextRun = &next
+		} else if task.TriggeredBy != "" {
+			// For manual tasks triggered by another task, use parent task's next run
+			var parentLog entities.TaskLog
+			if err := tm.Database.Where("task_name = ?", task.TriggeredBy).Order("executed_at desc").First(&parentLog).Error; err == nil {
+				if parentTask, exists := tm.Tasks[task.TriggeredBy]; exists && parentTask.Interval > 0 {
+					next := parentLog.ExecutedAt.Add(parentTask.Interval)
+					nextRun = &next
+				}
+			}
 		}
 	} else if err != gorm.ErrRecordNotFound {
 		logger.Log(fmt.Sprintf("Error fetching task log for %s: %v", taskName, err), logger.LogOptions{
