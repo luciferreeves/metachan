@@ -10,18 +10,18 @@ type AnimeTitles struct {
 
 // AnimeMappings contains IDs from various anime databases/services
 type AnimeMappings struct {
-	AniDB          int    `json:"anidb"`
-	Anilist        int    `json:"anilist"`
-	AnimeCountdown int    `json:"anime_countdown"`
-	AnimePlanet    string `json:"anime_planet"`
-	AniSearch      int    `json:"ani_search"`
-	IMDB           string `json:"imdb"`
-	Kitsu          int    `json:"kitsu"`
-	LiveChart      int    `json:"live_chart"`
-	NotifyMoe      string `json:"notify_moe"`
-	Simkl          int    `json:"simkl"`
-	TMDB           int    `json:"tmdb"`
-	TVDB           int    `json:"tvdb"`
+	AniDB          int    `json:"anidb,omitempty"`
+	Anilist        int    `json:"anilist,omitempty"`
+	AnimeCountdown int    `json:"anime_countdown,omitempty"`
+	AnimePlanet    string `json:"anime_planet,omitempty"`
+	AniSearch      int    `json:"ani_search,omitempty"`
+	IMDB           string `json:"imdb,omitempty"`
+	Kitsu          int    `json:"kitsu,omitempty"`
+	LiveChart      int    `json:"live_chart,omitempty"`
+	NotifyMoe      string `json:"notify_moe,omitempty"`
+	Simkl          int    `json:"simkl,omitempty"`
+	TMDB           int    `json:"tmdb,omitempty"`
+	TVDB           int    `json:"tvdb,omitempty"`
 }
 
 //
@@ -69,7 +69,7 @@ type AnimeEpisodes struct {
 	Aired    int                  `json:"aired"`
 	Subbed   int                  `json:"subbed"` // Count of subbed episodes
 	Dubbed   int                  `json:"dubbed"` // Count of dubbed episodes
-	Episodes []AnimeSingleEpisode `json:"episodes"`
+	Episodes []AnimeSingleEpisode `json:"episodes,omitempty"`
 }
 
 //
@@ -230,11 +230,11 @@ type Anime struct {
 	Airing            bool                 `json:"airing"`
 	Status            string               `json:"status"`
 	AiringStatus      AiringStatus         `json:"airing_status"`
-	Duration          string               `json:"duration"`
+	Duration          string               `json:"duration,omitempty"`
 	Images            AnimeImages          `json:"images"`
-	Logos             AnimeLogos           `json:"logos"`
-	Covers            AnimeImages          `json:"covers"`
-	Color             string               `json:"color"`
+	Logos             AnimeLogos           `json:"logos,omitempty"`
+	Covers            AnimeImages          `json:"covers,omitempty"`
+	Color             string               `json:"color,omitempty"`
 	Genres            []AnimeGenres        `json:"genres"`
 	Scores            AnimeScores          `json:"scores"`
 	Season            string               `json:"season"`
@@ -243,10 +243,10 @@ type Anime struct {
 	Producers         []AnimeProducer      `json:"producers"`
 	Studios           []AnimeStudio        `json:"studios"`
 	Licensors         []AnimeLicensor      `json:"licensors"`
-	Seasons           []AnimeSeason        `json:"seasons"`
+	Seasons           []AnimeSeason        `json:"seasons,omitempty"`
 	Episodes          AnimeEpisodes        `json:"episodes"`
-	NextAiringEpisode AnimeAiringEpisode   `json:"next_airing_episode"`
-	AiringSchedule    []AnimeAiringEpisode `json:"airing_schedule"`
-	Characters        []AnimeCharacter     `json:"characters"`
-	Mappings          AnimeMappings        `json:"mappings"`
+	NextAiringEpisode AnimeAiringEpisode   `json:"next_airing_episode,omitempty"`
+	AiringSchedule    []AnimeAiringEpisode `json:"airing_schedule,omitempty"`
+	Characters        []AnimeCharacter     `json:"characters,omitempty"`
+	Mappings          AnimeMappings        `json:"mappings,omitempty"`
 }

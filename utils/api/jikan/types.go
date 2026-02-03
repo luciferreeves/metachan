@@ -27,6 +27,57 @@ type JikanGenresResponse struct {
 	Data []JikanGenre `json:"data"`
 }
 
+// JikanAnimeListItem represents a single anime in list responses
+type JikanAnimeListItem struct {
+	MALID         int      `json:"mal_id"`
+	URL           string   `json:"url"`
+	Title         string   `json:"title"`
+	TitleEnglish  string   `json:"title_english"`
+	TitleJapanese string   `json:"title_japanese"`
+	TitleSynonyms []string `json:"title_synonyms"`
+	Type          string   `json:"type"`
+	Source        string   `json:"source"`
+	Episodes      int      `json:"episodes"`
+	Status        string   `json:"status"`
+	Airing        bool     `json:"airing"`
+	Synopsis      string   `json:"synopsis"`
+	Score         float64  `json:"score"`
+	ScoredBy      int      `json:"scored_by"`
+	Rank          int      `json:"rank"`
+	Popularity    int      `json:"popularity"`
+	Members       int      `json:"members"`
+	Favorites     int      `json:"favorites"`
+	Season        string   `json:"season"`
+	Year          int      `json:"year"`
+	Images        struct {
+		JPG struct {
+			ImageURL      string `json:"image_url"`
+			SmallImageURL string `json:"small_image_url"`
+			LargeImageURL string `json:"large_image_url"`
+		} `json:"jpg"`
+	} `json:"images"`
+	Genres         []JikanGenericMALStructure `json:"genres"`
+	ExplicitGenres []JikanGenericMALStructure `json:"explicit_genres"`
+	Producers      []JikanGenericMALStructure `json:"producers"`
+	Licensors      []JikanGenericMALStructure `json:"licensors"`
+	Studios        []JikanGenericMALStructure `json:"studios"`
+}
+
+// JikanAnimeListResponse represents paginated anime list response
+type JikanAnimeListResponse struct {
+	Pagination struct {
+		LastVisiblePage int  `json:"last_visible_page"`
+		HasNextPage     bool `json:"has_next_page"`
+		CurrentPage     int  `json:"current_page"`
+		Items           struct {
+			Count   int `json:"count"`
+			Total   int `json:"total"`
+			PerPage int `json:"per_page"`
+		} `json:"items"`
+	} `json:"pagination"`
+	Data []JikanAnimeListItem `json:"data"`
+}
+
 // JikanAnimeResponse represents the main anime response from Jikan API
 type JikanAnimeResponse struct {
 	Data struct {

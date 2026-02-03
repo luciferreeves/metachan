@@ -532,6 +532,93 @@ func (s *Service) GetAnimeDetails(mapping *entities.AnimeMapping) (*types.Anime,
 	return s.GetAnimeDetailsWithSource(mapping, "api")
 }
 
+// GetAnimeByGenre fetches anime list by genre with pagination
+func (s *Service) GetAnimeByGenre(genreID int, page int, limit int) ([]types.Anime, struct {
+	LastVisiblePage int  `json:"last_visible_page"`
+	HasNextPage     bool `json:"has_next_page"`
+	CurrentPage     int  `json:"current_page"`
+	Items           struct {
+		Count   int `json:"count"`
+		Total   int `json:"total"`
+		PerPage int `json:"per_page"`
+	} `json:"items"`
+}, error) {
+	// Fetch anime list from Jikan
+	response, err := s.jikanClient.GetAnimeByGenre(genreID, page, limit)
+	if err != nil {
+		return nil, struct {
+			LastVisiblePage int  `json:"last_visible_page"`
+			HasNextPage     bool `json:"has_next_page"`
+			CurrentPage     int  `json:"current_page"`
+			Items           struct {
+				Count   int `json:"count"`
+				Total   int `json:"total"`
+				PerPage int `json:"per_page"`
+			} `json:"items"`
+		}{}, fmt.Errorf("failed to fetch anime by genre: %w", err)
+	}
+
+	animeList := make([]types.Anime, 0, len(response.Data))
+	stalenessThreshold := 7 * 24 * time.Hour // 7 days
+
+	// Process each anime - check DB first, fetch only if missing/stale
+	for _, item := range response.Data {
+		// Try to get from database first
+		cachedAnime, err := database.GetAnimeByMALID(item.MALID)
+		if err == nil && cachedAnime != nil {
+			// Check if data is fresh (updated within last 7 days)
+			var dbAnime entities.Anime
+			if dbErr := database.DB.Where("mal_id = ?", item.MALID).First(&dbAnime).Error; dbErr == nil {
+				if time.Since(dbAnime.LastUpdated) < stalenessThreshold {
+					// Data is fresh, use cached version
+					cachedAnime.Seasons = nil
+					cachedAnime.Episodes.Episodes = nil
+					cachedAnime.NextAiringEpisode = types.AnimeAiringEpisode{}
+					cachedAnime.AiringSchedule = nil
+					cachedAnime.Characters = nil
+					animeList = append(animeList, *cachedAnime)
+					continue
+				}
+			}
+		}
+
+		// Data is missing or stale, fetch from API
+		mapping, err := database.GetAnimeMappingViaMALID(item.MALID)
+		if err != nil {
+			mapping = &entities.AnimeMapping{MAL: item.MALID}
+		}
+
+		fullAnime, err := s.GetAnimeDetailsWithSource(mapping, "genre_listing")
+		if err != nil {
+			logger.Log(fmt.Sprintf("Failed to fetch full anime for MAL ID %d: %v", item.MALID, err), logger.LogOptions{
+				Level:  logger.Error,
+				Prefix: "AnimeService",
+			})
+			// If fetch fails but we have cached data (even if stale), use it
+			if cachedAnime != nil {
+				cachedAnime.Seasons = nil
+				cachedAnime.Episodes.Episodes = nil
+				cachedAnime.NextAiringEpisode = types.AnimeAiringEpisode{}
+				cachedAnime.AiringSchedule = nil
+				cachedAnime.Characters = nil
+				animeList = append(animeList, *cachedAnime)
+			}
+			continue
+		}
+
+		// Clear fields not needed in genre listing (omitempty will handle JSON exclusion)
+		fullAnime.Seasons = nil
+		fullAnime.Episodes.Episodes = nil
+		fullAnime.NextAiringEpisode = types.AnimeAiringEpisode{}
+		fullAnime.AiringSchedule = nil
+		fullAnime.Characters = nil
+
+		animeList = append(animeList, *fullAnime)
+	}
+
+	return animeList, response.Pagination, nil
+}
+
 // GetEpisodeStreaming fetches streaming sources for a specific episode
 func (s *Service) GetEpisodeStreaming(title string, episodeNumber int, episodeID string, animeID uint) (*types.AnimeStreaming, error) {
 	// Try to get from database first

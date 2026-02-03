@@ -280,3 +280,23 @@ func (c *JikanClient) GetAnimeGenres() (*JikanGenresResponse, error) {
 
 	return &genresResponse, nil
 }
+
+// GetAnimeByGenre fetches paginated anime list for a specific genre
+func (c *JikanClient) GetAnimeByGenre(genreID int, page int, limit int) (*JikanAnimeListResponse, error) {
+	apiURL := fmt.Sprintf("https://api.jikan.moe/v4/anime?genres=%d&page=%d&limit=%d", genreID, page, limit)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	bodyBytes, err := c.makeRequest(ctx, apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get anime by genre: %w", err)
+	}
+
+	var listResponse JikanAnimeListResponse
+	if err := json.Unmarshal(bodyBytes, &listResponse); err != nil {
+		return nil, fmt.Errorf("failed to decode anime list response: %w", err)
+	}
+
+	return &listResponse, nil
+}

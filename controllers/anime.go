@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"metachan/database"
 	"metachan/entities"
 	animeService "metachan/services/anime"
@@ -177,5 +178,50 @@ func GetGenres(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{
 		"genres": genres,
+	})
+}
+
+// GetAnimeByGenre retrieves paginated anime list for a specific genre
+func GetAnimeByGenre(c *fiber.Ctx) error {
+	genreID := mappers.ForceInt(c.Params("id"))
+	page := mappers.ForceInt(c.Query("page", "1"))
+	limit := mappers.ForceInt(c.Query("limit", "12"))
+
+	if limit > 100 {
+		limit = 100
+	}
+	if limit < 1 {
+		limit = 12
+	}
+	if page < 1 {
+		page = 1
+	}
+
+	logger.Log(fmt.Sprintf("Fetching anime for genre %d, page %d, limit %d", genreID, page, limit), logger.LogOptions{
+		Level:  logger.Debug,
+		Prefix: "GenreController",
+	})
+
+	service := getAnimeService()
+	animeList, pagination, err := service.GetAnimeByGenre(genreID, page, limit)
+	if err != nil {
+		logger.Log("Failed to fetch anime by genre: "+err.Error(), logger.LogOptions{
+			Level:  logger.Error,
+			Prefix: "GenreController",
+		})
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to retrieve anime for genre",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"pagination": fiber.Map{
+			"current_page":      pagination.CurrentPage,
+			"has_next_page":     pagination.HasNextPage,
+			"last_visible_page": pagination.LastVisiblePage,
+			"total":             pagination.Items.Total,
+			"per_page":          pagination.Items.PerPage,
+		},
+		"data": animeList,
 	})
 }

@@ -64,6 +64,23 @@ func SaveAnimeToDatabase(animeData *types.Anime) error {
 	var existingAnime entities.Anime
 	result := tx.Where("mal_id = ?", animeData.MALID).First(&existingAnime)
 	if result.Error == nil {
+		// Delete all related records first to avoid UNIQUE constraint errors
+		tx.Where("anime_id = ?", existingAnime.ID).Delete(&entities.AnimeSingleEpisode{})
+		tx.Where("anime_id = ?", existingAnime.ID).Delete(&entities.AnimeCharacter{})
+		tx.Where("anime_id = ?", existingAnime.ID).Delete(&entities.ScheduleEpisode{})
+		tx.Where("anime_id = ?", existingAnime.ID).Delete(&entities.AnimeGenre{})
+		tx.Where("anime_id = ?", existingAnime.ID).Delete(&entities.AnimeProducer{})
+		tx.Where("anime_id = ?", existingAnime.ID).Delete(&entities.AnimeStudio{})
+		tx.Where("anime_id = ?", existingAnime.ID).Delete(&entities.AnimeLicensor{})
+		tx.Where("anime_id = ?", existingAnime.ID).Delete(&entities.AnimeSeason{})
+		tx.Where("anime_id = ?", existingAnime.ID).Delete(&entities.AnimeImages{})
+		tx.Where("anime_id = ?", existingAnime.ID).Delete(&entities.AnimeLogos{})
+		tx.Where("anime_id = ?", existingAnime.ID).Delete(&entities.AnimeCovers{})
+		tx.Where("anime_id = ?", existingAnime.ID).Delete(&entities.AnimeScores{})
+		tx.Where("anime_id = ?", existingAnime.ID).Delete(&entities.AiringStatus{})
+		tx.Where("anime_id = ?", existingAnime.ID).Delete(&entities.AnimeBroadcast{})
+
+		// Now delete the anime itself
 		if err := tx.Delete(&existingAnime).Error; err != nil {
 			tx.Rollback()
 			return err
