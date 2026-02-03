@@ -227,7 +227,7 @@ func (s *Service) GetAnimeDetailsWithSource(mapping *entities.AnimeMapping, sour
 					Prefix: "AnimeAPI",
 				})
 				// Fallback to basic episode generation
-				basicEpisodes := generateBasicEpisodes(episodes.Data)
+				basicEpisodes := generateBasicEpisodes(anime.Data.MALID, episodes.Data)
 				enrichedEpisodes = basicEpisodes
 			}
 		} else {
@@ -265,7 +265,7 @@ func (s *Service) GetAnimeDetailsWithSource(mapping *entities.AnimeMapping, sour
 
 			// Fallback to TMDB if TVDB failed or wasn't available
 			if usedfallback {
-				basicEpisodes := generateBasicEpisodes(episodes.Data)
+				basicEpisodes := generateBasicEpisodes(anime.Data.MALID, episodes.Data)
 				logger.Log(fmt.Sprintf("Generated basic episodes: %d", len(basicEpisodes)), logger.LogOptions{
 					Level:  logger.Debug,
 					Prefix: "AnimeAPI",

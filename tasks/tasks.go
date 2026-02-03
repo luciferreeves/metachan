@@ -36,6 +36,12 @@ func init() {
 						Level:  logger.Error,
 						Prefix: "TaskManager",
 					})
+					GlobalTaskManager.logTaskExecution("AnimeSync", "error", err.Error())
+				} else {
+					// Update AnimeSync's LastRun after successful completion
+					animeSyncEndTime := time.Now()
+					GlobalTaskManager.UpdateTaskLastRun("AnimeSync", animeSyncEndTime)
+					GlobalTaskManager.logTaskExecution("AnimeSync", "success", "Task executed successfully")
 				}
 			}()
 			return nil
@@ -52,7 +58,7 @@ func init() {
 	// Register AnimeSync task (triggered automatically after AnimeFetch completes)
 	err = GlobalTaskManager.RegisterTask(types.Task{
 		Name:     "AnimeSync",
-		Interval: 0, // No scheduled interval - runs after AnimeFetch
+		Interval: 7 * 24 * time.Hour, // Same interval as AnimeFetch
 		Execute:  AniSync,
 	})
 

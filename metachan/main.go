@@ -19,7 +19,9 @@ func main() {
 
 	tasks.GlobalTaskManager.StartAllTasks()
 
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+		DisableStartupMessage: true,
+	})
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:  "*",
 		AllowMethods:  "GET, HEAD, PUT, PATCH, POST, DELETE, OPTIONS",

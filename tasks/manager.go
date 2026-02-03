@@ -152,6 +152,15 @@ func (tm *TaskManager) StartTask(taskName string) {
 			}
 		}
 
+		// Skip ticker creation for manual-only tasks (interval = 0)
+		if task.Interval == 0 {
+			logger.Log(fmt.Sprintf("Task %s is manual-only (no scheduled interval)", taskName), logger.LogOptions{
+				Level:  logger.Debug,
+				Prefix: "TaskManager",
+			})
+			return
+		}
+
 		// Create ticker for subsequent executions
 		ticker := time.NewTicker(task.Interval)
 		tm.Mutex.Lock()
@@ -199,6 +208,21 @@ func (tm *TaskManager) StopTask(taskName string) {
 		delete(tm.Tickers, taskName)
 		logger.Log(fmt.Sprintf("Task %s stopped", taskName), logger.LogOptions{
 			Level:  logger.Info,
+			Prefix: "TaskManager",
+		})
+	}
+}
+
+// UpdateTaskLastRun manually updates a task's LastRun time
+func (tm *TaskManager) UpdateTaskLastRun(taskName string, lastRun time.Time) {
+	tm.Mutex.Lock()
+	defer tm.Mutex.Unlock()
+
+	if task, exists := tm.Tasks[taskName]; exists {
+		task.LastRun = lastRun
+		tm.Tasks[taskName] = task
+		logger.Log(fmt.Sprintf("Updated task %s LastRun: %v", taskName, lastRun), logger.LogOptions{
+			Level:  logger.Debug,
 			Prefix: "TaskManager",
 		})
 	}

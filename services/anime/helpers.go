@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-func generateEpisodeID(titles types.EpisodeTitles) string {
+func generateEpisodeID(malID int, episodeNumber int, titles types.EpisodeTitles) string {
 	var title string
 	if titles.English != "" {
 		title = titles.English
@@ -26,11 +26,13 @@ func generateEpisodeID(titles types.EpisodeTitles) string {
 		title = titles.Japanese
 	}
 
-	hash := md5.Sum([]byte(title))
+	// Include MAL ID and episode number to ensure uniqueness across all anime
+	uniqueString := fmt.Sprintf("%d-%d-%s", malID, episodeNumber, title)
+	hash := md5.Sum([]byte(uniqueString))
 	return fmt.Sprintf("%x", hash)
 }
 
-func generateBasicEpisodes(episodes []jikan.JikanAnimeEpisode) []types.AnimeSingleEpisode {
+func generateBasicEpisodes(malID int, episodes []jikan.JikanAnimeEpisode) []types.AnimeSingleEpisode {
 	var animeEpisodes []types.AnimeSingleEpisode
 
 	for _, episode := range episodes {
@@ -41,7 +43,7 @@ func generateBasicEpisodes(episodes []jikan.JikanAnimeEpisode) []types.AnimeSing
 		}
 
 		animeEpisodes = append(animeEpisodes, types.AnimeSingleEpisode{
-			ID:           generateEpisodeID(titles),
+			ID:           generateEpisodeID(malID, episode.MALID, titles),
 			Titles:       titles,
 			Aired:        episode.Aired,
 			Score:        episode.Score,
