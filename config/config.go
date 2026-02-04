@@ -1,86 +1,47 @@
 package config
 
 import (
-	"metachan/types"
+	"metachan/utils/env"
 	"metachan/utils/logger"
-	"os"
-	"strconv"
-	"strings"
 
 	"github.com/joho/godotenv"
 )
 
-var Config *types.ServerConfig
+var (
+	Server   server
+	Database database
+	Sync     sync
+	API      api
+)
 
 func init() {
-	logOptions := logger.LogOptions{
-		Prefix: "Config",
-		Level:  logger.Error,
-		Fatal:  true,
+	if err := godotenv.Load(); err != nil {
+		logger.Infof("Config", "No .env file found. Environment variables will be used directly.")
 	}
 
-	godotenv.Load()
-
-	Config = &types.ServerConfig{
-		DatabaseDriver: types.DatabaseDriver(getEnv("DB_DRIVER")),
-		DataSourceName: getEnv("DSN"),
-		Port:           getIntEnv("PORT"),
-		TMDB: types.TMDBConfig{
-			APIKey:          getEnv("TMDB_API_KEY"),
-			ReadAccessToken: getEnv("TMDB_READ_ACCESS_TOKEN"),
-		},
-		TVDB: types.TVDBConfig{
-			APIKey: getEnv("TVDB_API_KEY"),
-		},
+	if err := env.Parse(&Server); err != nil {
+		logger.Fatalf("Config", "Failed to parse server config: %v", err)
 	}
 
-	switch Config.DatabaseDriver {
-	case types.SQLite, types.MySQL, types.Postgres, types.SQLServer:
-	default:
-		logger.Log("Invalid database driver or database driver not set. Valid options are: sqlite, mysql, postgres, sqlserver", logOptions)
+	if err := env.Parse(&Database); err != nil {
+		logger.Fatalf("Config", "Failed to parse database config: %v", err)
 	}
 
-	if Config.DataSourceName == "" {
-		logger.Log("Invalid data source name or data source name not set", logOptions)
+	if err := env.Parse(&Sync); err != nil {
+		logger.Fatalf("Config", "Failed to parse sync config: %v", err)
 	}
 
-	if Config.Port == 0 {
-		logger.Log("Invalid port or port not set", logOptions)
+	if err := env.Parse(&API); err != nil {
+		logger.Fatalf("Config", "Failed to parse API config: %v", err)
 	}
 
-	if Config.TMDB.APIKey == "" {
-		logger.Log("Invalid TMDB API key or TMDB API key not set", logOptions)
+	if Server.Debug {
+		logger.SetDebug(true)
 	}
 
-	if Config.TMDB.ReadAccessToken == "" {
-		logger.Log("Invalid TMDB read access token or TMDB read access token not set", logOptions)
+	if err := verifyConfig(); err != nil {
+		logger.Fatalf("Config", "Configuration verification failed: %v", err)
 	}
 
-	if Config.TVDB.APIKey == "" {
-		logger.Log("Invalid TVDB API key or TVDB API key not set", logOptions)
-	}
-
-	logOptions.Level = logger.Success
-	logOptions.Fatal = false
-	logger.Log("Config initialized successfully", logOptions)
-}
-
-func getEnv(key string) string {
-	value, exists := os.LookupEnv(key)
-	if !exists {
-		return ""
-	}
-	return strings.TrimSpace(value)
-}
-
-func getIntEnv(key string) int {
-	value := getEnv(key)
-	if value == "" {
-		return 0
-	}
-	i, err := strconv.Atoi(value)
-	if err != nil {
-		return 0
-	}
-	return i
+	logger.Successf("Config", "Configuration loaded successfully")
 }
