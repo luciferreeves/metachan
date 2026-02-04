@@ -8,7 +8,9 @@ const (
 	Warn    LogLevel = "warn"
 	Error   LogLevel = "error"
 	Success LogLevel = "success"
+)
 
+const (
 	Reset = "\033[0m"
 	Cyan  = "\033[36m"
 	Gray  = "\033[90m"
@@ -25,10 +27,3 @@ const (
 	MessageColorDebug   = "\033[90m"
 	MessageColorSuccess = "\033[32m"
 )
-
-type LogOptions struct {
-	Timestamp bool
-	Prefix    string
-	Level     LogLevel
-	Fatal     bool
-}
