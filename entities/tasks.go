@@ -8,8 +8,15 @@ import (
 
 type TaskLog struct {
 	gorm.Model
-	TaskName   string `gorm:"index"`
-	Status     string // 'success', 'error', 'running'
-	Message    string // error message if any
-	ExecutedAt time.Time
+	TaskName   string    `gorm:"index" json:"task_name,omitempty"`
+	Status     string    `json:"status,omitempty"`
+	Message    string    `json:"message,omitempty"`
+	ExecutedAt time.Time `json:"executed_at,omitempty"`
+}
+
+type TaskStatus struct {
+	gorm.Model
+	TaskName    string    `gorm:"uniqueIndex;not null" json:"task_name"`
+	IsCompleted bool      `gorm:"default:false" json:"is_completed,omitempty"`
+	LastRunAt   time.Time `json:"last_run_at,omitempty"`
 }
