@@ -22,73 +22,61 @@ func HTTPLogger() fiber.Handler {
 		path := c.Path()
 		ip := c.IP()
 
-		level := getLogLevel(status)
-		messageColor := getMessageColor(level)
-
-		// Make sure method is padded within the message itself
+		// Pad method for alignment
 		paddedMethod := method
-		if len(method) < 7 { // "DELETE" is 6 chars, add a margin
+		if len(method) < 7 {
 			paddedMethod = method + strings.Repeat(" ", 7-len(method))
 		}
 
-		// Format with consistent spacing and alignment
-		message := fmt.Sprintf("%s %s%-3d%s %-15s %-10s %-s",
+		message := fmt.Sprintf(
+			"%s %-3d %-15s %-10s %s",
 			paddedMethod,
-			messageColor, status, logger.Reset,
+			status,
 			"IP: "+ip,
 			"TTR: "+formatDuration(duration),
 			"Path: "+path,
 		)
 
-		logger.Log(message, logger.LogOptions{
-			Prefix: "HTTP",
-			Level:  level,
-		})
+		logByStatus(status, "HTTP", message)
 
 		return err
 	}
 }
 
-func getLogLevel(status int) logger.LogLevel {
+func logByStatus(status int, prefix, message string) {
 	switch {
 	case status >= 500:
-		return logger.Error
+		logger.Errorf(prefix, "%s", message)
 	case status >= 400:
-		return logger.Warn
+		logger.Warnf(prefix, "%s", message)
 	case status >= 300:
-		return logger.Info
+		logger.Infof(prefix, "%s", message)
 	case status >= 200:
-		return logger.Success
+		logger.Successf(prefix, "%s", message)
 	default:
-		return logger.Info
-	}
-}
-
-func getMessageColor(level logger.LogLevel) string {
-	switch level {
-	case logger.Info:
-		return logger.MessageColorInfo
-	case logger.Warn:
-		return logger.MessageColorWarn
-	case logger.Error:
-		return logger.MessageColorError
-	case logger.Debug:
-		return logger.MessageColorDebug
-	case logger.Success:
-		return logger.MessageColorSuccess
-	default:
-		return logger.MessageColorInfo
+		logger.Infof(prefix, "%s", message)
 	}
 }
 
 func formatDuration(d time.Duration) string {
 	if d < time.Microsecond {
 		return strconv.FormatInt(d.Nanoseconds(), 10) + "ns"
-	} else if d < time.Millisecond {
-		return strconv.FormatInt(d.Nanoseconds()/1000, 10) + "µs"
-	} else if d < time.Second {
-		return strconv.FormatFloat(float64(d.Nanoseconds())/float64(time.Millisecond), 'f', 3, 64) + "ms"
-	} else {
-		return strconv.FormatFloat(float64(d.Nanoseconds())/float64(time.Second), 'f', 3, 64) + "s"
 	}
+	if d < time.Millisecond {
+		return strconv.FormatInt(d.Nanoseconds()/1_000, 10) + "µs"
+	}
+	if d < time.Second {
+		return strconv.FormatFloat(
+			float64(d.Nanoseconds())/float64(time.Millisecond),
+			'f',
+			3,
+			64,
+		) + "ms"
+	}
+	return strconv.FormatFloat(
+		float64(d.Nanoseconds())/float64(time.Second),
+		'f',
+		3,
+		64,
+	) + "s"
 }
