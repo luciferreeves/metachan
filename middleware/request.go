@@ -10,7 +10,8 @@ const requestKey = "__request_ctx"
 
 func request() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		c.Locals(requestKey, meta.Request(c))
+		req := meta.BuildRequest(c)
+		c.Locals(requestKey, req)
 		return c.Next()
 	}
 }
