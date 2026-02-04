@@ -10,7 +10,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-func HTTPLogger() fiber.Handler {
+func httpLogger() fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		start := time.Now()
 

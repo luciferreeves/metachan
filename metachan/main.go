@@ -29,10 +29,9 @@ func main() {
 		MaxAge:        86400,
 	}))
 	app.Use(helmet.New())
-	app.Use(middleware.HTTPLogger())
 
-	// Initialize the router
 	router.Initialize(app)
+	middleware.Initialize(app)
 
 	// Start the server
 	if err := app.Listen(fmt.Sprintf("%s:%d", config.Server.Host, config.Server.Port)); err != nil {
