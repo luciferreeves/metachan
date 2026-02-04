@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"metachan/config"
-	"metachan/database"
 	"metachan/middleware"
 	"metachan/router"
 	"metachan/tasks"
@@ -16,7 +15,6 @@ import (
 
 func main() {
 	logger.Init()
-	database.AutoMigrate()
 
 	tasks.GlobalTaskManager.StartAllTasks()
 

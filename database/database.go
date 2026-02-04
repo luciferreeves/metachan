@@ -1,9 +1,8 @@
 package database
 
 import (
-	"fmt"
 	"metachan/config"
-	"metachan/types"
+	"metachan/enums"
 	"metachan/utils/logger"
 
 	"gorm.io/driver/mysql"
@@ -19,37 +18,29 @@ var DB *gorm.DB
 func init() {
 	var dialector gorm.Dialector
 
-	switch config.Config.DatabaseDriver {
-	case types.Postgres:
-		dialector = postgres.Open(config.Config.DataSourceName)
-	case types.SQLite:
-		dialector = sqlite.Open(config.Config.DataSourceName)
-	case types.MySQL:
-		dialector = mysql.Open(config.Config.DataSourceName)
-	case types.SQLServer:
-		dialector = sqlserver.Open(config.Config.DataSourceName)
+	switch enums.DatabaseDriver(config.Database.Driver) {
+	case enums.SQLite:
+		dialector = sqlite.Open(config.Database.DSN)
+	case enums.MySQL:
+		dialector = mysql.Open(config.Database.DSN)
+	case enums.Postgres:
+		dialector = postgres.Open(config.Database.DSN)
+	case enums.SQLServer:
+		dialector = sqlserver.Open(config.Database.DSN)
 	default:
-		logger.Log(fmt.Sprintf("Invalid database driver: %s", config.Config.DatabaseDriver), logger.LogOptions{
-			Prefix: "Database",
-			Level:  logger.Error,
-			Fatal:  true,
-		})
+		logger.Fatalf("Database", "Invalid database driver: %s", config.Database.Driver)
 	}
 
 	var err error
 	DB, err = gorm.Open(dialector, &gorm.Config{
 		Logger: gormlogger.Default.LogMode(gormlogger.Silent),
 	})
+
 	if err != nil {
-		logger.Log(fmt.Sprintf("Error connecting to database: %v", err), logger.LogOptions{
-			Prefix: "Database",
-			Level:  logger.Error,
-			Fatal:  true,
-		})
-	} else {
-		logger.Log("Database connection established successfully", logger.LogOptions{
-			Prefix: "Database",
-			Level:  logger.Success,
-		})
+		logger.Fatalf("Database", "Error connecting to database: %v", err)
 	}
+
+	logger.Successf("Database", "Database connection established successfully")
+
+	migrate()
 }

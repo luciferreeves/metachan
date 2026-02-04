@@ -2,34 +2,28 @@ package database
 
 import (
 	"context"
-	"fmt"
 	"metachan/utils/logger"
 	"time"
 )
 
-func DatabaseConnectionStatus() bool {
+func GetConnectionStatus() bool {
 	if DB == nil {
 		return false
 	}
 
-	sqlDB, err := DB.DB()
+	instance, err := DB.DB()
+
 	if err != nil {
-		logger.Log(fmt.Sprintf("Unable to get SQL DB: %v", err), logger.LogOptions{
-			Prefix: "Database",
-			Level:  logger.Error,
-		})
+		logger.Errorf("Database", "Failed to get DB instance: %v", err)
 		return false
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err = sqlDB.PingContext(ctx)
+	err = instance.PingContext(ctx)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Database connection error: %v", err), logger.LogOptions{
-			Prefix: "Database",
-			Level:  logger.Error,
-		})
+		logger.Errorf("Database", "Database connection error: %v", err)
 		return false
 	}
 	return true

@@ -1,58 +1,56 @@
 package database
 
 import (
-	"fmt"
 	"metachan/entities"
 	"metachan/utils/logger"
 )
 
-func AutoMigrate() {
+func migrate() {
 	err := DB.AutoMigrate(
-		// Base entities
+		// Task entities
 		&entities.TaskLog{},
-		&entities.AnimeMapping{},
+		&entities.TaskStatus{},
 
-		// Anime entities
-		&entities.Anime{},
-		&entities.AnimeImages{},
-		&entities.AnimeLogos{},
-		&entities.AnimeCovers{},
-		&entities.AnimeScores{},
-		&entities.AiringStatusDates{},
+		// Mapping entity
+		&entities.Mapping{},
+
+		// Meta entities (shared/reusable)
+		&entities.Title{},
+		&entities.Scores{},
+		&entities.Date{},
 		&entities.AiringStatus{},
-		&entities.AnimeBroadcast{},
-		&entities.AnimeGenre{},
-		&entities.AnimeProducer{},
-		&entities.AnimeStudio{},
-		&entities.AnimeLicensor{},
-		&entities.NextEpisode{},
-		&entities.ScheduleEpisode{},
-		&entities.EpisodeTitles{},
-		&entities.AnimeSingleEpisode{},
-		&entities.AnimeCharacter{},
-		&entities.AnimeVoiceActor{},
-		&entities.AnimeSeason{},
+		&entities.Broadcast{},
+		&entities.Images{},
+		&entities.Logos{},
+		&entities.ExternalURL{},
+		&entities.SimpleTitle{},
+		&entities.SimpleImage{},
 
-		// Streaming entities
-		&entities.EpisodeStreaming{},
-		&entities.EpisodeStreamingSource{},
+		// Genre entity
+		&entities.Genre{},
+
+		// Producer entity
+		&entities.Producer{},
+
+		// Anime entity
+		&entities.Anime{},
+
+		// Episode entities
+		&entities.Episode{},
+		&entities.StreamingSource{},
+		&entities.EpisodeSchedule{},
+		&entities.NextEpisode{},
+
+		// Season entity
+		&entities.Season{},
+
+		// Character/Persona entities
+		&entities.Character{},
+		&entities.VoiceActor{},
 	)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Failed to migrate database: %v", err), logger.LogOptions{
-			Level:  logger.Error,
-			Prefix: "Database",
-		})
-		panic(err)
+		logger.Fatalf("Database", "Error during database migration: %v", err)
 	}
 
-	logger.Log("Database migration completed successfully", logger.LogOptions{
-		Level:  logger.Info,
-		Prefix: "Database",
-	})
-}
-
-// Migrate creates and migrations all tables
-func Migrate() {
-	// Use AutoMigrate to ensure consistent behavior
-	AutoMigrate()
+	logger.Successf("Database", "Database migration completed successfully")
 }
