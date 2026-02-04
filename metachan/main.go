@@ -15,6 +15,7 @@ import (
 )
 
 func main() {
+	logger.Init()
 	database.AutoMigrate()
 
 	tasks.GlobalTaskManager.StartAllTasks()
@@ -36,16 +37,9 @@ func main() {
 	router.Initialize(app)
 
 	// Start the server
-	if err := app.Listen(fmt.Sprintf(":%d", config.Config.Port)); err != nil {
-		logger.Log(fmt.Sprintf("Failed to the start the server on port %d: %v", config.Config.Port, err), logger.LogOptions{
-			Prefix: "Main",
-			Level:  logger.Error,
-			Fatal:  true,
-		})
+	if err := app.Listen(fmt.Sprintf("%s:%d", config.Server.Host, config.Server.Port)); err != nil {
+		logger.Fatalf("Main", "Failed to the start the server on %s:%d: %v", config.Server.Host, config.Server.Port, err)
 	}
 
-	logger.Log(fmt.Sprintf("Server started on port %d", config.Config.Port), logger.LogOptions{
-		Prefix: "Main",
-		Level:  logger.Success,
-	})
+	logger.Successf("Main", "Server started on %s:%d", config.Server.Host, config.Server.Port)
 }
