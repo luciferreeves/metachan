@@ -3,412 +3,142 @@ package aniskip
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math"
+	"metachan/types"
 	"metachan/utils/logger"
 	"metachan/utils/ratelimit"
 	"net/http"
-	"sync"
+	"strconv"
 	"time"
 )
 
 const (
-	aniskipBaseURL = "https://api.aniskip.com/v2"
+	aniskipBaseURL    = "https://api.aniskip.com/v2"
+	rateLimitPerSec   = 10
+	rateLimitPer10Sec = 100
+	contextTimeout    = 10 * time.Second
 )
 
-// AniSkipClient provides methods for interacting with the AniSkip API
-type AniSkipClient struct {
-	client      *http.Client
-	rateLimiter *ratelimit.RateLimiter
-	maxRetries  int
-	cache       map[string][]AnimeSkipTimes
-	cacheMutex  sync.RWMutex
-	cacheTTL    time.Duration
-	cacheTime   map[string]time.Time
-}
-
-// EpisodeSkipTimesResult contains skip times for a specific episode
-type EpisodeSkipTimesResult struct {
-	EpisodeNumber int
-	SkipTimes     []AnimeSkipTimes
-}
-
-// NewAniSkipClient creates a new client for the AniSkip API
-func NewAniSkipClient() *AniSkipClient {
-	return &AniSkipClient{
-		client: &http.Client{
-			Timeout: 5 * time.Second, // Reduced timeout for faster failure detection
+var (
+	rateLimiter = ratelimit.NewMultiLimiter(
+		ratelimit.NewRateLimiter(rateLimitPerSec, time.Second),
+		ratelimit.NewRateLimiter(rateLimitPer10Sec, 10*time.Second),
+	)
+	clientInstance = &client{
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
 		},
-		rateLimiter: ratelimit.NewRateLimiter(10, 10*time.Second), // Conservative rate limit
-		maxRetries:  2,
-		cache:       make(map[string][]AnimeSkipTimes),
-		cacheTime:   make(map[string]time.Time),
-		cacheTTL:    24 * time.Hour, // Cache skip times for 24 hours
+		maxRetries: 3,
+		backoff:    1 * time.Second,
 	}
+)
+
+func (c *client) getBackOffDuration(attempt int) time.Duration {
+	return time.Duration(float64(c.backoff) * math.Pow(2, float64(attempt-1)))
 }
 
-// getCacheKey generates a cache key for skip times
-func (c *AniSkipClient) getCacheKey(malID, episode int) string {
-	return fmt.Sprintf("%d-%d", malID, episode)
-}
-
-// getFromCache tries to get skip times from cache
-func (c *AniSkipClient) getFromCache(malID, episode int) ([]AnimeSkipTimes, bool) {
-	key := c.getCacheKey(malID, episode)
-
-	c.cacheMutex.RLock()
-	defer c.cacheMutex.RUnlock()
-
-	// Check if we have a valid cache entry
-	if cacheTime, exists := c.cacheTime[key]; exists {
-		// Check if cache is still valid
-		if time.Since(cacheTime) < c.cacheTTL {
-			return c.cache[key], true
+func (c *client) getRetryAfterDuration(resp *http.Response) time.Duration {
+	if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
+		if seconds, err := strconv.Atoi(retryAfter); err == nil {
+			return time.Duration(seconds) * time.Second
 		}
 	}
-
-	return nil, false
+	return c.backoff
 }
 
-// saveToCache saves skip times to cache
-func (c *AniSkipClient) saveToCache(malID, episode int, skipTimes []AnimeSkipTimes) {
-	key := c.getCacheKey(malID, episode)
+func (c *client) handleRetry(retries *int, url string, reason string, retryAfter time.Duration) bool {
+	*retries++
+	if *retries >= c.maxRetries {
+		return false
+	}
 
-	c.cacheMutex.Lock()
-	defer c.cacheMutex.Unlock()
+	backoffDuration := c.getBackOffDuration(*retries)
+	if retryAfter > backoffDuration {
+		backoffDuration = retryAfter
+	}
 
-	c.cache[key] = skipTimes
-	c.cacheTime[key] = time.Now()
+	logger.Warnf("AniskipClient", "%s for %s (attempt %d/%d)", reason, url, *retries, c.maxRetries)
+	time.Sleep(backoffDuration)
+	return true
 }
 
-// GetSkipTimesForEpisode fetches skip times for a specific anime episode
-func (c *AniSkipClient) GetSkipTimesForEpisode(malID, episodeNumber int) ([]AnimeSkipTimes, error) {
-	// Check cache first
-	if skipTimes, found := c.getFromCache(malID, episodeNumber); found {
-		return skipTimes, nil
-	}
+func (c *client) makeRequest(ctx context.Context, url string) ([]byte, error) {
+	var response *http.Response
+	var retries int
 
-	// Wait for rate limiter before making request
-	c.rateLimiter.Wait()
+	for retries < c.maxRetries {
+		rateLimiter.Wait()
 
-	// Using v2 API which is more efficient
-	apiURL := fmt.Sprintf("%s/skip-times/%d/%d?types=op&types=ed", aniskipBaseURL, malID, episodeNumber)
-
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Create request
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// Execute request with retries
-	var resp *http.Response
-	var lastErr error
-	success := false
-
-	for i := 0; i <= c.maxRetries && !success; i++ {
-		resp, err = c.client.Do(req)
+		request, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 		if err != nil {
-			lastErr = err
-			// Backoff with exponential delay
-			time.Sleep(time.Duration((i+1)*300) * time.Millisecond)
-			continue
+			logger.Errorf("AniskipClient", "Failed to create request: %v", err)
+			return nil, errors.New("failed to create request to Aniskip API")
 		}
 
-		defer resp.Body.Close()
-
-		if resp.StatusCode == http.StatusNotFound {
-			// No skip times found, not an error
-			c.saveToCache(malID, episodeNumber, []AnimeSkipTimes{})
-			return []AnimeSkipTimes{}, nil
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-			lastErr = fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
-
-			// Longer backoff for rate limits
-			if resp.StatusCode == http.StatusTooManyRequests {
-				time.Sleep(time.Duration((i+1)*1000) * time.Millisecond)
-			} else {
-				time.Sleep(time.Duration((i+1)*300) * time.Millisecond)
+		response, err = c.httpClient.Do(request)
+		if err != nil {
+			if !c.handleRetry(&retries, url, fmt.Sprintf("Request failed: %v", err), 0) {
+				logger.Errorf("AniskipClient", "All retries exhausted for request to %s: %v", url, err)
+				return nil, errors.New("failed to make request to Aniskip API after max retries")
 			}
 			continue
 		}
 
-		success = true
-	}
+		defer response.Body.Close()
 
-	if !success {
-		return nil, fmt.Errorf("failed after %d retries: %w", c.maxRetries, lastErr)
-	}
+		switch response.StatusCode {
+		case http.StatusNotFound:
+			// No skip times found, return empty slice
+			return []byte("{\"found\":false,\"results\":[]}"), nil
+		case http.StatusTooManyRequests:
+			retryAfter := c.getRetryAfterDuration(response)
+			if !c.handleRetry(&retries, url, "Rate limited", retryAfter) {
+				logger.Errorf("AniskipClient", "All retries exhausted for request to %s", url)
+				return nil, errors.New("failed to make request to Aniskip API after max retries")
+			}
+		case http.StatusOK:
+			bytes, err := io.ReadAll(response.Body)
 
-	// Parse response
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024)) // 1MB limit
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// The response format from AniSkip API v1 as shown in the prompt example
-	type aniskipResponse struct {
-		Found   bool `json:"found"`
-		Results []struct {
-			Interval struct {
-				StartTime float64 `json:"start_time"`
-				EndTime   float64 `json:"end_time"`
-			} `json:"interval"`
-			SkipType      string  `json:"skip_type"`
-			SkipID        string  `json:"skip_id"`
-			EpisodeLength float64 `json:"episode_length"`
-		} `json:"results"`
-	}
-
-	var skipResp aniskipResponse
-	if err := json.Unmarshal(bodyBytes, &skipResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	// If no results found
-	if !skipResp.Found || len(skipResp.Results) == 0 {
-		c.saveToCache(malID, episodeNumber, []AnimeSkipTimes{})
-		return []AnimeSkipTimes{}, nil
-	}
-
-	// Convert to our skip times format
-	var skipTimes []AnimeSkipTimes
-	for _, result := range skipResp.Results {
-		skipTime := AnimeSkipTimes{
-			SkipType:      result.SkipType,
-			StartTime:     result.Interval.StartTime,
-			EndTime:       result.Interval.EndTime,
-			EpisodeLength: result.EpisodeLength,
-		}
-		skipTimes = append(skipTimes, skipTime)
-	}
-
-	// Save to cache
-	c.saveToCache(malID, episodeNumber, skipTimes)
-
-	return skipTimes, nil
-}
-
-// GetSkipTimesForEpisodesBatch fetches skip times for episodes in batches
-func (c *AniSkipClient) GetSkipTimesForEpisodesBatch(malID int, episodes []int) (map[int][]AnimeSkipTimes, error) {
-	// If we have fewer than 3 episodes, use individual requests instead
-	if len(episodes) < 3 {
-		results := make(map[int][]AnimeSkipTimes)
-		for _, ep := range episodes {
-			skipTimes, err := c.GetSkipTimesForEpisode(malID, ep)
 			if err != nil {
-				return nil, err
+				logger.Errorf("AniskipClient", "Failed to read response body from %s: %v", url, err)
+				return nil, errors.New("failed to read response from Aniskip API")
 			}
-			results[ep] = skipTimes
-		}
-		return results, nil
-	}
 
-	// Check if all episodes are cached and return them
-	allCached := true
-	cachedResults := make(map[int][]AnimeSkipTimes)
+			return bytes, nil
+		default:
+			retries++
+			backoffDuration := c.getBackOffDuration(retries)
 
-	for _, ep := range episodes {
-		if skipTimes, found := c.getFromCache(malID, ep); found {
-			cachedResults[ep] = skipTimes
-		} else {
-			allCached = false
-			break
+			logger.Warnf("AniskipClient", "Request to %s returned status %d (attempt %d/%d)", url, response.StatusCode, retries, c.maxRetries)
+
+			time.Sleep(backoffDuration)
 		}
 	}
 
-	if allCached {
-		return cachedResults, nil
-	}
-
-	// Wait for rate limiter
-	c.rateLimiter.Wait()
-
-	// Construct episode IDs parameter
-	episodeParams := ""
-	for i, ep := range episodes {
-		if i > 0 {
-			episodeParams += ","
-		}
-		episodeParams += fmt.Sprintf("%d", ep)
-	}
-
-	// Batch endpoint URL
-	apiURL := fmt.Sprintf("%s/skip-times-batch?malId=%d&episodeIds=%s&types=op&types=ed",
-		aniskipBaseURL, malID, episodeParams)
-
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-	defer cancel()
-
-	// Create request
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create batch request: %w", err)
-	}
-
-	// Execute request with retries
-	var resp *http.Response
-	var lastErr error
-	success := false
-
-	for i := 0; i <= c.maxRetries && !success; i++ {
-		resp, err = c.client.Do(req)
-		if err != nil {
-			lastErr = err
-			time.Sleep(time.Duration((i+1)*300) * time.Millisecond)
-			continue
-		}
-
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-			lastErr = fmt.Errorf("batch request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
-
-			if resp.StatusCode == http.StatusTooManyRequests {
-				time.Sleep(time.Duration((i+1)*1000) * time.Millisecond)
-			} else {
-				time.Sleep(time.Duration((i+1)*300) * time.Millisecond)
-			}
-			continue
-		}
-
-		success = true
-	}
-
-	if !success {
-		return nil, fmt.Errorf("batch request failed after %d retries: %w", c.maxRetries, lastErr)
-	}
-
-	// Parse response
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-	if err != nil {
-		return nil, fmt.Errorf("failed to read batch response: %w", err)
-	}
-
-	// Batch response format
-	type batchSkipTime struct {
-		Interval struct {
-			StartTime float64 `json:"start_time"`
-			EndTime   float64 `json:"end_time"`
-		} `json:"interval"`
-		SkipType      string  `json:"skip_type"`
-		SkipID        string  `json:"skip_id"`
-		EpisodeLength float64 `json:"episode_length"`
-	}
-
-	type episodeSkipTimes struct {
-		Found   bool            `json:"found"`
-		Results []batchSkipTime `json:"results"`
-	}
-
-	// Map of episode number to skip times
-	type batchResponse map[string]episodeSkipTimes
-
-	var skipResp batchResponse
-	if err := json.Unmarshal(bodyBytes, &skipResp); err != nil {
-		return nil, fmt.Errorf("failed to decode batch response: %w", err)
-	}
-
-	results := make(map[int][]AnimeSkipTimes)
-
-	// Process results
-	for epStr, epData := range skipResp {
-		var epNum int
-		if _, err := fmt.Sscanf(epStr, "%d", &epNum); err != nil {
-			continue // Skip if we can't parse the episode number
-		}
-
-		var skipTimes []AnimeSkipTimes
-
-		if epData.Found {
-			for _, result := range epData.Results {
-				skipTimes = append(skipTimes, AnimeSkipTimes{
-					SkipType:      result.SkipType,
-					StartTime:     result.Interval.StartTime,
-					EndTime:       result.Interval.EndTime,
-					EpisodeLength: result.EpisodeLength,
-				})
-			}
-		}
-
-		// Save to cache
-		c.saveToCache(malID, epNum, skipTimes)
-		results[epNum] = skipTimes
-	}
-
-	return results, nil
+	logger.Errorf("AniskipClient", "All retries exhausted for request to %s", url)
+	return nil, errors.New("failed to make request to Aniskip API after max retries")
 }
 
-// GetSkipTimesForEpisodes fetches skip times for multiple episodes efficiently
-func (c *AniSkipClient) GetSkipTimesForEpisodes(malID int, episodeCount int, maxConcurrent int) []EpisodeSkipResult {
-	startTime := time.Now()
+func GetSkipTimesForEpisode(malID, episodeNumber int) ([]types.AniskipResult, error) {
+	url := fmt.Sprintf("%s/skip-times/%d/%d?types=op&types=ed", aniskipBaseURL, malID, episodeNumber)
+	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 
-	// If episode count is small, just use single endpoint
-	if episodeCount <= 5 {
-		results := []EpisodeSkipResult{}
-		for i := 1; i <= episodeCount; i++ {
-			skipTimes, err := c.GetSkipTimesForEpisode(malID, i)
-			if err == nil && len(skipTimes) > 0 {
-				results = append(results, EpisodeSkipResult{
-					EpisodeNumber: i,
-					SkipTimes:     skipTimes,
-				})
-			}
-		}
-		return results
+	defer cancel()
+
+	bytes, err := clientInstance.makeRequest(ctx, url)
+	if err != nil {
+		logger.Errorf("AniskipClient", "GetSkipTimesForEpisode failed for MAL ID %d, episode %d: %v", malID, episodeNumber, err)
+		return nil, errors.New("failed to fetch skip times from Aniskip API")
 	}
 
-	// Create episode numbers slice
-	allEpisodes := make([]int, episodeCount)
-	for i := 0; i < episodeCount; i++ {
-		allEpisodes[i] = i + 1 // 1-indexed episodes
+	var response types.AniskipResponse
+	if err := json.Unmarshal(bytes, &response); err != nil {
+		logger.Errorf("AniskipClient", "Failed to unmarshal response for MAL ID %d, episode %d: %v", malID, episodeNumber, err)
+		return nil, errors.New("failed to parse skip times from Aniskip API")
 	}
 
-	// Batch size - we'll process episodes in batches
-	const batchSize = 25
-	var results []EpisodeSkipResult
-
-	// Process in batches
-	for i := 0; i < episodeCount; i += batchSize {
-		end := i + batchSize
-		if end > episodeCount {
-			end = episodeCount
-		}
-
-		batchEpisodes := allEpisodes[i:end]
-		batchResults, err := c.GetSkipTimesForEpisodesBatch(malID, batchEpisodes)
-		if err != nil {
-			logger.Log(fmt.Sprintf("Error fetching skip times batch %d-%d: %v", i+1, end, err), logger.LogOptions{
-				Level:  logger.Warn,
-				Prefix: "AniSkip",
-			})
-			continue
-		}
-
-		// Add results to the final list
-		for epNum, skipTimes := range batchResults {
-			if len(skipTimes) > 0 {
-				results = append(results, EpisodeSkipResult{
-					EpisodeNumber: epNum,
-					SkipTimes:     skipTimes,
-				})
-			}
-		}
-	}
-
-	logger.Log(fmt.Sprintf("AniSkip: Fetched skip times for %d episodes of %d in %s",
-		len(results), episodeCount, time.Since(startTime)), logger.LogOptions{
-		Level:  logger.Debug,
-		Prefix: "AniSkip",
-	})
-
-	return results
+	return response.Results, nil
 }
