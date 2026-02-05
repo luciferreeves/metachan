@@ -3,96 +3,145 @@ package malsync
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math"
+	"metachan/types"
+	"metachan/utils/logger"
 	"net/http"
+	"strconv"
 	"time"
 )
 
 const (
 	malsyncAPIBaseURL = "https://api.malsync.moe/mal"
+	contextTimeout    = 10 * time.Second
 )
 
-// MALSyncClient provides methods for interacting with the MALSync API
-type MALSyncClient struct {
-	client     *http.Client
-	maxRetries int
-}
-
-// NewMALSyncClient creates a new client for the MALSync API
-func NewMALSyncClient() *MALSyncClient {
-	return &MALSyncClient{
-		client: &http.Client{
-			Timeout: 8 * time.Second, // Shorter timeout since this is a less critical API
+var (
+	clientInstance = &client{
+		httpClient: &http.Client{
+			Timeout: 10 * time.Second,
 		},
-		maxRetries: 2,
+		maxRetries: 3,
+		backoff:    1 * time.Second,
 	}
+)
+
+func (c *client) getBackOffDuration(attempt int) time.Duration {
+	return time.Duration(float64(c.backoff) * math.Pow(2, float64(attempt-1)))
 }
 
-// GetAnimeByMALID fetches anime metadata from MALSync by MAL ID
-func (c *MALSyncClient) GetAnimeByMALID(malID int) (*MALSyncAnimeResponse, error) {
-	apiURL := fmt.Sprintf("%s/anime/%d", malsyncAPIBaseURL, malID)
+func (c *client) getRetryAfterDuration(resp *http.Response) time.Duration {
+	if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
+		if seconds, err := strconv.Atoi(retryAfter); err == nil {
+			return time.Duration(seconds) * time.Second
+		}
+	}
+	return c.backoff
+}
 
-	// Create context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (c *client) handleRetry(retries *int, url string, reason string, retryAfter time.Duration) bool {
+	*retries++
+	if *retries >= c.maxRetries {
+		return false
+	}
+
+	backoffDuration := c.getBackOffDuration(*retries)
+	if retryAfter > backoffDuration {
+		backoffDuration = retryAfter
+	}
+
+	logger.Warnf("MalsyncClient", "%s for %s (attempt %d/%d)", reason, url, *retries, c.maxRetries)
+	time.Sleep(backoffDuration)
+	return true
+}
+
+func (c *client) makeRequest(ctx context.Context, url string) ([]byte, error) {
+	var response *http.Response
+	var retries int
+
+	for retries < c.maxRetries {
+		request, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			logger.Errorf("MalsyncClient", "Failed to create request: %v", err)
+			return nil, errors.New("failed to create request to Malsync API")
+		}
+
+		request.Header.Set("Accept", "application/json")
+
+		response, err = c.httpClient.Do(request)
+		if err != nil {
+			if !c.handleRetry(&retries, url, fmt.Sprintf("Request failed: %v", err), 0) {
+				logger.Errorf("MalsyncClient", "All retries exhausted for request to %s: %v", url, err)
+				return nil, errors.New("failed to make request to Malsync API after max retries")
+			}
+			continue
+		}
+
+		defer response.Body.Close()
+
+		switch response.StatusCode {
+		case http.StatusNotFound:
+			// Not found is not an error, return nil
+			return nil, nil
+		case http.StatusTooManyRequests:
+			retryAfter := c.getRetryAfterDuration(response)
+			if !c.handleRetry(&retries, url, "Rate limited", retryAfter) {
+				logger.Errorf("MalsyncClient", "All retries exhausted for request to %s", url)
+				return nil, errors.New("failed to make request to Malsync API after max retries")
+			}
+		case http.StatusOK:
+			bytes, err := io.ReadAll(response.Body)
+
+			if err != nil {
+				logger.Errorf("MalsyncClient", "Failed to read response body from %s: %v", url, err)
+				return nil, errors.New("failed to read response from Malsync API")
+			}
+
+			return bytes, nil
+		default:
+			retries++
+			backoffDuration := c.getBackOffDuration(retries)
+
+			logger.Warnf("MalsyncClient", "Request to %s returned status %d (attempt %d/%d)", url, response.StatusCode, retries, c.maxRetries)
+
+			time.Sleep(backoffDuration)
+		}
+	}
+
+	logger.Errorf("MalsyncClient", "All retries exhausted for request to %s", url)
+	return nil, errors.New("failed to make request to Malsync API after max retries")
+}
+
+func GetAnimeByMALID(malID int) (*types.MalsyncAnimeResponse, error) {
+	url := fmt.Sprintf("%s/anime/%d", malsyncAPIBaseURL, malID)
+	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
+
 	defer cancel()
 
-	// Create request
-	req, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	bytes, err := clientInstance.makeRequest(ctx, url)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		logger.Errorf("MalsyncClient", "GetAnimeByMALID failed for MAL ID %d: %v", malID, err)
+		return nil, errors.New("failed to fetch anime data from Malsync API")
 	}
 
-	req.Header.Set("Accept", "application/json")
-
-	// Execute request with retries
-	var resp *http.Response
-	var lastErr error
-	success := false
-
-	for i := 0; i <= c.maxRetries && !success; i++ {
-		resp, err = c.client.Do(req)
-		if err != nil {
-			lastErr = err
-			time.Sleep(time.Duration((i+1)*300) * time.Millisecond) // Short backoff on error
-			continue
-		}
-
-		defer resp.Body.Close()
-
-		if resp.StatusCode == http.StatusNotFound {
-			return nil, nil // Not found is not an error, just return nil
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-			lastErr = fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
-			time.Sleep(time.Duration((i+1)*300) * time.Millisecond)
-			continue
-		}
-
-		success = true
+	// Handle 404 case where makeRequest returns nil, nil
+	if bytes == nil {
+		return nil, nil
 	}
 
-	if !success {
-		return nil, fmt.Errorf("failed after %d retries: %w", c.maxRetries, lastErr)
+	var response types.MalsyncAnimeResponse
+	if err := json.Unmarshal(bytes, &response); err != nil {
+		logger.Errorf("MalsyncClient", "Failed to unmarshal response for MAL ID %d: %v", malID, err)
+		return nil, errors.New("failed to parse anime data from Malsync API")
 	}
 
-	// Parse response
-	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024)) // 1MB limit
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	var malSyncResponse MALSyncAnimeResponse
-	if err := json.Unmarshal(bodyBytes, &malSyncResponse); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	// Simple validation
-	if malSyncResponse.ID == 0 {
+	if response.ID == 0 {
+		logger.Errorf("MalsyncClient", "Received empty response for MAL ID %d", malID)
 		return nil, fmt.Errorf("received empty response for MAL ID %d", malID)
 	}
 
-	return &malSyncResponse, nil
+	return &response, nil
 }

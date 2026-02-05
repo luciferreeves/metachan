@@ -28,7 +28,7 @@ type Episode struct {
 type EpisodeSkipTime struct {
 	gorm.Model
 	EpisodeID string  `gorm:"index;size:32" json:"episode_id"`
-	SkipType  string  `gorm:"index" json:"skip_type"` // op, ed, recap, etc.
+	SkipType  string  `gorm:"index" json:"skip_type"`
 	StartTime float64 `json:"start_time"`
 	EndTime   float64 `json:"end_time"`
 }
