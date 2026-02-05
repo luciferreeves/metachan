@@ -5,11 +5,11 @@ import (
 )
 
 type Task struct {
-	Name        string
-	Interval    time.Duration
-	Execute     func() error
-	LastRun     time.Time
-	TriggeredBy string // Name of parent task that triggers this task (for manual tasks)
+	Name         string
+	Interval     time.Duration
+	Execute      func() error
+	LastRun      time.Time
+	Dependencies []string // List of task names that must complete before this task runs
 }
 
 type TaskStatus struct {

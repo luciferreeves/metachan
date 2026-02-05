@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"fmt"
+	"metachan/database"
 	"metachan/entities"
 	"metachan/types"
 	"metachan/utils/logger"
@@ -99,7 +100,13 @@ func (tm *TaskManager) StartTask(taskName string) {
 	go func() {
 		// Execute immediately if due
 		if shouldExec {
-			if err := task.Execute(); err != nil {
+			// Check dependencies before executing
+			if !tm.checkDependencies(task) {
+				logger.Log(fmt.Sprintf("Task %s dependencies not met, skipping execution", taskName), logger.LogOptions{
+					Level:  logger.Warn,
+					Prefix: "TaskManager",
+				})
+			} else if err := task.Execute(); err != nil {
 				tm.logTaskExecution(taskName, "error", err.Error())
 				logger.Log(fmt.Sprintf("Task %s execution failed: %v", taskName, err), logger.LogOptions{
 					Level:  logger.Error,
@@ -108,6 +115,15 @@ func (tm *TaskManager) StartTask(taskName string) {
 			} else {
 				task.LastRun = time.Now()
 				tm.logTaskExecution(taskName, "success", "Task executed successfully")
+
+				// Mark task as complete
+				if err := database.MarkTaskComplete(taskName); err != nil {
+					logger.Log(fmt.Sprintf("Failed to mark task %s as complete: %v", taskName, err), logger.LogOptions{
+						Level:  logger.Warn,
+						Prefix: "TaskManager",
+					})
+				}
+
 				logger.Log(fmt.Sprintf("Task %s executed successfully", taskName), logger.LogOptions{
 					Level:  logger.Success,
 					Prefix: "TaskManager",
@@ -133,7 +149,13 @@ func (tm *TaskManager) StartTask(taskName string) {
 			// Wait for initial delay before first execution
 			select {
 			case <-time.After(initialDelay):
-				if err := task.Execute(); err != nil {
+				// Check dependencies before executing
+				if !tm.checkDependencies(task) {
+					logger.Log(fmt.Sprintf("Task %s dependencies not met, skipping execution", taskName), logger.LogOptions{
+						Level:  logger.Warn,
+						Prefix: "TaskManager",
+					})
+				} else if err := task.Execute(); err != nil {
 					tm.logTaskExecution(taskName, "error", err.Error())
 					logger.Log(fmt.Sprintf("Task %s execution failed: %v", taskName, err), logger.LogOptions{
 						Level:  logger.Error,
@@ -142,6 +164,15 @@ func (tm *TaskManager) StartTask(taskName string) {
 				} else {
 					task.LastRun = time.Now()
 					tm.logTaskExecution(taskName, "success", "Task executed successfully")
+
+					// Mark task as complete
+					if err := database.MarkTaskComplete(taskName); err != nil {
+						logger.Log(fmt.Sprintf("Failed to mark task %s as complete: %v", taskName, err), logger.LogOptions{
+							Level:  logger.Warn,
+							Prefix: "TaskManager",
+						})
+					}
+
 					logger.Log(fmt.Sprintf("Task %s executed successfully", taskName), logger.LogOptions{
 						Level:  logger.Success,
 						Prefix: "TaskManager",
@@ -171,7 +202,13 @@ func (tm *TaskManager) StartTask(taskName string) {
 		for {
 			select {
 			case <-ticker.C:
-				if err := task.Execute(); err != nil {
+				// Check dependencies before executing
+				if !tm.checkDependencies(task) {
+					logger.Log(fmt.Sprintf("Task %s dependencies not met, skipping execution", taskName), logger.LogOptions{
+						Level:  logger.Warn,
+						Prefix: "TaskManager",
+					})
+				} else if err := task.Execute(); err != nil {
 					tm.logTaskExecution(taskName, "error", err.Error())
 					logger.Log(fmt.Sprintf("Task %s execution failed: %v", taskName, err), logger.LogOptions{
 						Level:  logger.Error,
@@ -180,6 +217,15 @@ func (tm *TaskManager) StartTask(taskName string) {
 				} else {
 					task.LastRun = time.Now()
 					tm.logTaskExecution(taskName, "success", "Task executed successfully")
+
+					// Mark task as complete
+					if err := database.MarkTaskComplete(taskName); err != nil {
+						logger.Log(fmt.Sprintf("Failed to mark task %s as complete: %v", taskName, err), logger.LogOptions{
+							Level:  logger.Warn,
+							Prefix: "TaskManager",
+						})
+					}
+
 					logger.Log(fmt.Sprintf("Task %s executed successfully", taskName), logger.LogOptions{
 						Level:  logger.Success,
 						Prefix: "TaskManager",
@@ -208,21 +254,6 @@ func (tm *TaskManager) StopTask(taskName string) {
 		delete(tm.Tickers, taskName)
 		logger.Log(fmt.Sprintf("Task %s stopped", taskName), logger.LogOptions{
 			Level:  logger.Info,
-			Prefix: "TaskManager",
-		})
-	}
-}
-
-// UpdateTaskLastRun manually updates a task's LastRun time
-func (tm *TaskManager) UpdateTaskLastRun(taskName string, lastRun time.Time) {
-	tm.Mutex.Lock()
-	defer tm.Mutex.Unlock()
-
-	if task, exists := tm.Tasks[taskName]; exists {
-		task.LastRun = lastRun
-		tm.Tasks[taskName] = task
-		logger.Log(fmt.Sprintf("Updated task %s LastRun: %v", taskName, lastRun), logger.LogOptions{
-			Level:  logger.Debug,
 			Prefix: "TaskManager",
 		})
 	}
@@ -259,6 +290,25 @@ func (tm *TaskManager) StopAllTasks() {
 	}
 }
 
+// checkDependencies verifies all task dependencies are complete
+func (tm *TaskManager) checkDependencies(task types.Task) bool {
+	if len(task.Dependencies) == 0 {
+		return true
+	}
+
+	for _, depName := range task.Dependencies {
+		if !database.IsTaskComplete(depName) {
+			logger.Log(fmt.Sprintf("Dependency %s not completed for task %s", depName, task.Name), logger.LogOptions{
+				Level:  logger.Debug,
+				Prefix: "TaskManager",
+			})
+			return false
+		}
+	}
+
+	return true
+}
+
 func (tm *TaskManager) GetTaskStatus(taskName string) *types.TaskStatus {
 	tm.Mutex.Lock()
 	task, registered := tm.Tasks[taskName]
@@ -277,15 +327,6 @@ func (tm *TaskManager) GetTaskStatus(taskName string) *types.TaskStatus {
 		if task.Interval > 0 {
 			next := logEntry.ExecutedAt.Add(task.Interval)
 			nextRun = &next
-		} else if task.TriggeredBy != "" {
-			// For manual tasks triggered by another task, use parent task's next run
-			var parentLog entities.TaskLog
-			if err := tm.Database.Where("task_name = ?", task.TriggeredBy).Order("executed_at desc").First(&parentLog).Error; err == nil {
-				if parentTask, exists := tm.Tasks[task.TriggeredBy]; exists && parentTask.Interval > 0 {
-					next := parentLog.ExecutedAt.Add(parentTask.Interval)
-					nextRun = &next
-				}
-			}
 		}
 	} else if err != gorm.ErrRecordNotFound {
 		logger.Log(fmt.Sprintf("Error fetching task log for %s: %v", taskName, err), logger.LogOptions{

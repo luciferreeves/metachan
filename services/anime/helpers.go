@@ -160,14 +160,14 @@ func generateGenres(genres, explicitGenres []jikan.JikanGenericMALStructure) []t
 }
 
 // generateStudios converts Jikan studio structures to our format
-func generateStudios(studios []jikan.JikanGenericMALStructure) []types.AnimeStudio {
-	var animeStudios []types.AnimeStudio
+func generateStudios(studios []jikan.JikanGenericMALStructure) []types.AnimeProducer {
+	var animeStudios []types.AnimeProducer
 
 	for _, studio := range studios {
-		animeStudios = append(animeStudios, types.AnimeStudio{
-			Name:     studio.Name,
-			StudioID: studio.MALID,
-			URL:      studio.URL,
+		animeStudios = append(animeStudios, types.AnimeProducer{
+			Name:  studio.Name,
+			MALID: studio.MALID,
+			URL:   studio.URL,
 		})
 	}
 
@@ -180,9 +180,9 @@ func generateProducers(producers []jikan.JikanGenericMALStructure) []types.Anime
 
 	for _, producer := range producers {
 		animeProducers = append(animeProducers, types.AnimeProducer{
-			Name:       producer.Name,
-			ProducerID: producer.MALID,
-			URL:        producer.URL,
+			Name:  producer.Name,
+			MALID: producer.MALID,
+			URL:   producer.URL,
 		})
 	}
 
@@ -190,14 +190,14 @@ func generateProducers(producers []jikan.JikanGenericMALStructure) []types.Anime
 }
 
 // generateLicensors converts Jikan licensor structures to our format
-func generateLicensors(licensors []jikan.JikanGenericMALStructure) []types.AnimeLicensor {
-	var animeLicensors []types.AnimeLicensor
+func generateLicensors(licensors []jikan.JikanGenericMALStructure) []types.AnimeProducer {
+	var animeLicensors []types.AnimeProducer
 
 	for _, licensor := range licensors {
-		animeLicensors = append(animeLicensors, types.AnimeLicensor{
-			Name:       licensor.Name,
-			ProducerID: licensor.MALID,
-			URL:        licensor.URL,
+		animeLicensors = append(animeLicensors, types.AnimeProducer{
+			Name:  licensor.Name,
+			MALID: licensor.MALID,
+			URL:   licensor.URL,
 		})
 	}
 

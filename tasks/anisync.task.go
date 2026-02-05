@@ -83,18 +83,21 @@ func AniSync() error {
 			}
 		}
 
-		// Calculate time remaining (after processing at least 10 items for accuracy)
-		timeRemaining := ""
+		// Calculate progress and ETA
+		progress := float64(processed+1) / float64(itemsToSync) * 100
+		eta := ""
 		if processed >= 10 {
 			elapsed := time.Since(startTime)
 			avgTimePerItem := elapsed / time.Duration(processed)
 			remainingItems := itemsToSync - processed
 			remaining := time.Duration(remainingItems) * avgTimePerItem
-			timeRemaining = fmt.Sprintf(" - ETA: %s", formatDuration(remaining))
+			eta = formatDuration(remaining)
+		} else {
+			eta = "calculating..."
 		}
 
 		// Fetch full anime details
-		logger.Log(fmt.Sprintf("[%d/%d] Synchronising MAL ID %d...%s", processed+1, itemsToSync, mapping.MAL, timeRemaining), logger.LogOptions{
+		logger.Log(fmt.Sprintf("[%d/%d] Synchronising MAL ID %d - %.1f%% | ETA: %s", processed+1, itemsToSync, mapping.MAL, progress, eta), logger.LogOptions{
 			Level:  logger.Info,
 			Prefix: "AniSync",
 		})

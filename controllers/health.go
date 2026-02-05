@@ -11,7 +11,7 @@ import (
 
 func HealthStatus(c *fiber.Ctx) error {
 	// Check if the database is connected
-	databaseStatus := database.DatabaseConnectionStatus()
+	databaseStatus := database.GetConnectionStatus()
 
 	// Get the memory stats
 	memoryStats := stats.GetMemoryStats()

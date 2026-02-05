@@ -103,25 +103,40 @@ type AnimeGenres struct {
 	URL     string `json:"url"`
 }
 
-// AnimeProducer contains producer information
+// AnimeProducer contains full producer/studio/licensor information
 type AnimeProducer struct {
-	Name       string `json:"name"`
-	ProducerID int    `json:"producer_id"`
-	URL        string `json:"url"`
+	MALID       int                   `json:"mal_id"`
+	URL         string                `json:"url"`
+	Name        string                `json:"name,omitempty"`
+	Titles      []ProducerTitle       `json:"titles,omitempty"`
+	Images      *ProducerImages       `json:"images,omitempty"`
+	Favorites   int                   `json:"favorites,omitempty"`
+	Count       int                   `json:"count,omitempty"`
+	Established string                `json:"established,omitempty"`
+	About       string                `json:"about,omitempty"`
+	External    []ProducerExternalURL `json:"external,omitempty"`
 }
 
-// AnimeLicensor contains licensor information
-type AnimeLicensor struct {
-	Name       string `json:"name"`
-	ProducerID int    `json:"producer_id"`
-	URL        string `json:"url"`
+// ProducerTitle represents a producer title variant
+type ProducerTitle struct {
+	Type  string `json:"type"`
+	Title string `json:"title"`
 }
 
-// AnimeStudio contains studio information
-type AnimeStudio struct {
-	Name     string `json:"name"`
-	StudioID int    `json:"studio_id"`
-	URL      string `json:"url"`
+// ProducerImages represents producer image URLs
+type ProducerImages struct {
+	JPG ProducerJPGImage `json:"jpg"`
+}
+
+// ProducerJPGImage represents JPG image variant
+type ProducerJPGImage struct {
+	ImageURL string `json:"image_url"`
+}
+
+// ProducerExternalURL represents an external URL for a producer
+type ProducerExternalURL struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
 }
 
 //
@@ -241,8 +256,8 @@ type Anime struct {
 	Year              int                  `json:"year"`
 	Broadcast         AnimeBroadcast       `json:"broadcast"`
 	Producers         []AnimeProducer      `json:"producers"`
-	Studios           []AnimeStudio        `json:"studios"`
-	Licensors         []AnimeLicensor      `json:"licensors"`
+	Studios           []AnimeProducer      `json:"studios"`
+	Licensors         []AnimeProducer      `json:"licensors"`
 	Seasons           []AnimeSeason        `json:"seasons,omitempty"`
 	Episodes          AnimeEpisodes        `json:"episodes"`
 	NextAiringEpisode AnimeAiringEpisode   `json:"next_airing_episode,omitempty"`

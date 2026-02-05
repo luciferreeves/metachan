@@ -299,25 +299,53 @@ func (s *Service) GetAnimeDetailsWithSource(mapping *entities.AnimeMapping, sour
 		})
 
 		var err error
+
+		// Try primary title first
 		subCount, dubCount, err = s.streamingClient.GetStreamingCounts(searchTitle)
 
-		// If the first title fails, try with English title
+		// If primary title fails, try with English title
 		if err != nil && anime.Data.TitleEnglish != "" {
 			englishTitle := strings.TrimPrefix(anime.Data.TitleEnglish, "English: ")
+			logger.Log(fmt.Sprintf("Retrying with English title: %s", englishTitle), logger.LogOptions{
+				Level:  logger.Debug,
+				Prefix: "AnimeAPI",
+			})
 			subCount, dubCount, err = s.streamingClient.GetStreamingCounts(englishTitle)
 		}
 
-		// If English title fails, try with Japanese title
-		if err != nil && anime.Data.TitleJapanese != "" {
-			subCount, dubCount, err = s.streamingClient.GetStreamingCounts(anime.Data.TitleJapanese)
+		// If English title fails, try with Romaji title from Anilist
+		if err != nil && anilistAnime != nil && anilistAnime.Data.Media.Title.Romaji != "" {
+			romajiTitle := anilistAnime.Data.Media.Title.Romaji
+			logger.Log(fmt.Sprintf("Retrying with Romaji title: %s", romajiTitle), logger.LogOptions{
+				Level:  logger.Debug,
+				Prefix: "AnimeAPI",
+			})
+			subCount, dubCount, err = s.streamingClient.GetStreamingCounts(romajiTitle)
+		}
 
-			// Log the final error if all attempts failed
-			if err != nil {
-				logger.Log(fmt.Sprintf("Failed to fetch streaming counts after all attempts: %v", err), logger.LogOptions{
-					Level:  logger.Warn,
+		// If Romaji fails, try synonyms
+		if err != nil && len(anime.Data.TitleSynonyms) > 0 {
+			for _, synonym := range anime.Data.TitleSynonyms {
+				if synonym == "" {
+					continue
+				}
+				logger.Log(fmt.Sprintf("Retrying with synonym: %s", synonym), logger.LogOptions{
+					Level:  logger.Debug,
 					Prefix: "AnimeAPI",
 				})
+				subCount, dubCount, err = s.streamingClient.GetStreamingCounts(synonym)
+				if err == nil {
+					break // Found a match
+				}
 			}
+		}
+
+		// Log the final error if all attempts failed
+		if err != nil {
+			logger.Log(fmt.Sprintf("Failed to fetch streaming counts after all attempts: %v", err), logger.LogOptions{
+				Level:  logger.Warn,
+				Prefix: "AnimeAPI",
+			})
 		}
 
 		logger.Log(fmt.Sprintf("Streaming count check took %s. Subbed: %d, Dubbed: %d",
@@ -607,6 +635,265 @@ func (s *Service) GetAnimeByGenre(genreID int, page int, limit int) ([]types.Ani
 		}
 
 		// Clear fields not needed in genre listing (omitempty will handle JSON exclusion)
+		fullAnime.Seasons = nil
+		fullAnime.Episodes.Episodes = nil
+		fullAnime.NextAiringEpisode = types.AnimeAiringEpisode{}
+		fullAnime.AiringSchedule = nil
+		fullAnime.Characters = nil
+
+		animeList = append(animeList, *fullAnime)
+	}
+
+	return animeList, response.Pagination, nil
+}
+
+// GetAnimeByProducer fetches anime list by producer with pagination
+func (s *Service) GetAnimeByProducer(producerID int, page int, limit int) ([]types.Anime, struct {
+	LastVisiblePage int  `json:"last_visible_page"`
+	HasNextPage     bool `json:"has_next_page"`
+	CurrentPage     int  `json:"current_page"`
+	Items           struct {
+		Count   int `json:"count"`
+		Total   int `json:"total"`
+		PerPage int `json:"per_page"`
+	} `json:"items"`
+}, error) {
+	// Fetch anime list from Jikan
+	response, err := s.jikanClient.GetAnimeByProducer(producerID, page, limit)
+	if err != nil {
+		return nil, struct {
+			LastVisiblePage int  `json:"last_visible_page"`
+			HasNextPage     bool `json:"has_next_page"`
+			CurrentPage     int  `json:"current_page"`
+			Items           struct {
+				Count   int `json:"count"`
+				Total   int `json:"total"`
+				PerPage int `json:"per_page"`
+			} `json:"items"`
+		}{}, fmt.Errorf("failed to fetch anime by producer: %w", err)
+	}
+
+	animeList := make([]types.Anime, 0, len(response.Data))
+	stalenessThreshold := 7 * 24 * time.Hour // 7 days
+
+	// Process each anime - check DB first, fetch only if missing/stale
+	for _, item := range response.Data {
+		// Try to get from database first
+		cachedAnime, err := database.GetAnimeByMALID(item.MALID)
+		if err == nil && cachedAnime != nil {
+			// Check if data is fresh (updated within last 7 days)
+			var dbAnime entities.Anime
+			if dbErr := database.DB.Where("mal_id = ?", item.MALID).First(&dbAnime).Error; dbErr == nil {
+				if time.Since(dbAnime.LastUpdated) < stalenessThreshold {
+					// Data is fresh, use cached version
+					cachedAnime.Seasons = nil
+					cachedAnime.Episodes.Episodes = nil
+					cachedAnime.NextAiringEpisode = types.AnimeAiringEpisode{}
+					cachedAnime.AiringSchedule = nil
+					cachedAnime.Characters = nil
+					animeList = append(animeList, *cachedAnime)
+					continue
+				}
+			}
+		}
+
+		// Data is missing or stale, fetch from API
+		mapping, err := database.GetAnimeMappingViaMALID(item.MALID)
+		if err != nil {
+			mapping = &entities.AnimeMapping{MAL: item.MALID}
+		}
+
+		fullAnime, err := s.GetAnimeDetailsWithSource(mapping, "producer_listing")
+		if err != nil {
+			logger.Log(fmt.Sprintf("Failed to fetch full anime for MAL ID %d: %v", item.MALID, err), logger.LogOptions{
+				Level:  logger.Error,
+				Prefix: "AnimeService",
+			})
+			// If fetch fails but we have cached data (even if stale), use it
+			if cachedAnime != nil {
+				cachedAnime.Seasons = nil
+				cachedAnime.Episodes.Episodes = nil
+				cachedAnime.NextAiringEpisode = types.AnimeAiringEpisode{}
+				cachedAnime.AiringSchedule = nil
+				cachedAnime.Characters = nil
+				animeList = append(animeList, *cachedAnime)
+			}
+			continue
+		}
+
+		// Clear fields not needed in producer listing (omitempty will handle JSON exclusion)
+		fullAnime.Seasons = nil
+		fullAnime.Episodes.Episodes = nil
+		fullAnime.NextAiringEpisode = types.AnimeAiringEpisode{}
+		fullAnime.AiringSchedule = nil
+		fullAnime.Characters = nil
+
+		animeList = append(animeList, *fullAnime)
+	}
+
+	return animeList, response.Pagination, nil
+}
+
+func (s *Service) GetAnimeByStudio(studioID int, page int, limit int) ([]types.Anime, struct {
+	LastVisiblePage int  `json:"last_visible_page"`
+	HasNextPage     bool `json:"has_next_page"`
+	CurrentPage     int  `json:"current_page"`
+	Items           struct {
+		Count   int `json:"count"`
+		Total   int `json:"total"`
+		PerPage int `json:"per_page"`
+	} `json:"items"`
+}, error) {
+	// Fetch anime list from Jikan
+	response, err := s.jikanClient.GetAnimeByStudio(studioID, page, limit)
+	if err != nil {
+		return nil, struct {
+			LastVisiblePage int  `json:"last_visible_page"`
+			HasNextPage     bool `json:"has_next_page"`
+			CurrentPage     int  `json:"current_page"`
+			Items           struct {
+				Count   int `json:"count"`
+				Total   int `json:"total"`
+				PerPage int `json:"per_page"`
+			} `json:"items"`
+		}{}, fmt.Errorf("failed to fetch anime by studio: %w", err)
+	}
+
+	animeList := make([]types.Anime, 0, len(response.Data))
+	stalenessThreshold := 7 * 24 * time.Hour // 7 days
+
+	// Process each anime - check DB first, fetch only if missing/stale
+	for _, item := range response.Data {
+		// Try to get from database first
+		cachedAnime, err := database.GetAnimeByMALID(item.MALID)
+		if err == nil && cachedAnime != nil {
+			// Check if data is fresh (updated within last 7 days)
+			var dbAnime entities.Anime
+			if dbErr := database.DB.Where("mal_id = ?", item.MALID).First(&dbAnime).Error; dbErr == nil {
+				if time.Since(dbAnime.LastUpdated) < stalenessThreshold {
+					// Data is fresh, use cached version
+					cachedAnime.Seasons = nil
+					cachedAnime.Episodes.Episodes = nil
+					cachedAnime.NextAiringEpisode = types.AnimeAiringEpisode{}
+					cachedAnime.AiringSchedule = nil
+					cachedAnime.Characters = nil
+					animeList = append(animeList, *cachedAnime)
+					continue
+				}
+			}
+		}
+
+		// Data is missing or stale, fetch from API
+		mapping, err := database.GetAnimeMappingViaMALID(item.MALID)
+		if err != nil {
+			mapping = &entities.AnimeMapping{MAL: item.MALID}
+		}
+
+		fullAnime, err := s.GetAnimeDetailsWithSource(mapping, "studio_listing")
+		if err != nil {
+			logger.Log(fmt.Sprintf("Failed to fetch full anime for MAL ID %d: %v", item.MALID, err), logger.LogOptions{
+				Level:  logger.Error,
+				Prefix: "AnimeService",
+			})
+			// If fetch fails but we have cached data (even if stale), use it
+			if cachedAnime != nil {
+				cachedAnime.Seasons = nil
+				cachedAnime.Episodes.Episodes = nil
+				cachedAnime.NextAiringEpisode = types.AnimeAiringEpisode{}
+				cachedAnime.AiringSchedule = nil
+				cachedAnime.Characters = nil
+				animeList = append(animeList, *cachedAnime)
+			}
+			continue
+		}
+
+		// Clear fields not needed in studio listing (omitempty will handle JSON exclusion)
+		fullAnime.Seasons = nil
+		fullAnime.Episodes.Episodes = nil
+		fullAnime.NextAiringEpisode = types.AnimeAiringEpisode{}
+		fullAnime.AiringSchedule = nil
+		fullAnime.Characters = nil
+
+		animeList = append(animeList, *fullAnime)
+	}
+
+	return animeList, response.Pagination, nil
+}
+
+func (s *Service) GetAnimeByLicensor(licensorID int, page int, limit int) ([]types.Anime, struct {
+	LastVisiblePage int  `json:"last_visible_page"`
+	HasNextPage     bool `json:"has_next_page"`
+	CurrentPage     int  `json:"current_page"`
+	Items           struct {
+		Count   int `json:"count"`
+		Total   int `json:"total"`
+		PerPage int `json:"per_page"`
+	} `json:"items"`
+}, error) {
+	// Fetch anime list from Jikan
+	response, err := s.jikanClient.GetAnimeByLicensor(licensorID, page, limit)
+	if err != nil {
+		return nil, struct {
+			LastVisiblePage int  `json:"last_visible_page"`
+			HasNextPage     bool `json:"has_next_page"`
+			CurrentPage     int  `json:"current_page"`
+			Items           struct {
+				Count   int `json:"count"`
+				Total   int `json:"total"`
+				PerPage int `json:"per_page"`
+			} `json:"items"`
+		}{}, fmt.Errorf("failed to fetch anime by licensor: %w", err)
+	}
+
+	animeList := make([]types.Anime, 0, len(response.Data))
+	stalenessThreshold := 7 * 24 * time.Hour // 7 days
+
+	// Process each anime - check DB first, fetch only if missing/stale
+	for _, item := range response.Data {
+		// Try to get from database first
+		cachedAnime, err := database.GetAnimeByMALID(item.MALID)
+		if err == nil && cachedAnime != nil {
+			// Check if data is fresh (updated within last 7 days)
+			var dbAnime entities.Anime
+			if dbErr := database.DB.Where("mal_id = ?", item.MALID).First(&dbAnime).Error; dbErr == nil {
+				if time.Since(dbAnime.LastUpdated) < stalenessThreshold {
+					// Data is fresh, use cached version
+					cachedAnime.Seasons = nil
+					cachedAnime.Episodes.Episodes = nil
+					cachedAnime.NextAiringEpisode = types.AnimeAiringEpisode{}
+					cachedAnime.AiringSchedule = nil
+					cachedAnime.Characters = nil
+					animeList = append(animeList, *cachedAnime)
+					continue
+				}
+			}
+		}
+
+		// Data is missing or stale, fetch from API
+		mapping, err := database.GetAnimeMappingViaMALID(item.MALID)
+		if err != nil {
+			mapping = &entities.AnimeMapping{MAL: item.MALID}
+		}
+
+		fullAnime, err := s.GetAnimeDetailsWithSource(mapping, "licensor_listing")
+		if err != nil {
+			logger.Log(fmt.Sprintf("Failed to fetch full anime for MAL ID %d: %v", item.MALID, err), logger.LogOptions{
+				Level:  logger.Error,
+				Prefix: "AnimeService",
+			})
+			// If fetch fails but we have cached data (even if stale), use it
+			if cachedAnime != nil {
+				cachedAnime.Seasons = nil
+				cachedAnime.Episodes.Episodes = nil
+				cachedAnime.NextAiringEpisode = types.AnimeAiringEpisode{}
+				cachedAnime.AiringSchedule = nil
+				cachedAnime.Characters = nil
+				animeList = append(animeList, *cachedAnime)
+			}
+			continue
+		}
+
+		// Clear fields not needed in licensor listing (omitempty will handle JSON exclusion)
 		fullAnime.Seasons = nil
 		fullAnime.Episodes.Episodes = nil
 		fullAnime.NextAiringEpisode = types.AnimeAiringEpisode{}
