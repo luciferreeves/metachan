@@ -15,6 +15,7 @@ const prefixWidth = 15
 var (
 	loggerInstance *zap.Logger
 	level          zap.AtomicLevel
+	showTimestamp  bool
 )
 
 func timeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
@@ -66,12 +67,15 @@ func Init() {
 	level = zap.NewAtomicLevelAt(zapcore.InfoLevel)
 
 	encoderCfg := zapcore.EncoderConfig{
-		TimeKey:     "ts",
 		LevelKey:    "level",
 		MessageKey:  "msg",
 		LineEnding:  "\n",
-		EncodeTime:  timeEncoder,
 		EncodeLevel: levelEncoder,
+	}
+
+	if showTimestamp {
+		encoderCfg.TimeKey = "ts"
+		encoderCfg.EncodeTime = timeEncoder
 	}
 
 	encoder := zapcore.NewConsoleEncoder(encoderCfg)
@@ -89,6 +93,10 @@ func Init() {
 	)
 
 	loggerInstance = zap.New(core, zap.AddCaller())
+}
+
+func SetTimestamp(enabled bool) {
+	showTimestamp = enabled
 }
 
 func SetDebug(enabled bool) {

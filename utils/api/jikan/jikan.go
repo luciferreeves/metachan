@@ -251,7 +251,6 @@ func GetAnimeByGenre(genreID int, page int, limit int) (*types.JikanAnimeSearchR
 
 func GetAnimeProducers() (*types.JikanProducersResponse, error) {
 	url := fmt.Sprintf("%s/producers", jikanAPIBaseURL)
-	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 	page := 1
 	hasNextPage := true
 
@@ -260,12 +259,12 @@ func GetAnimeProducers() (*types.JikanProducersResponse, error) {
 		Pagination: types.JikanGenericPaginationEntity{},
 	}
 
-	defer cancel()
-
 	for hasNextPage {
 		pageURL := fmt.Sprintf("%s?page=%d", url, page)
 
+		ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 		bytes, err := clientInstance.makeRequest(ctx, pageURL)
+		cancel()
 		if err != nil {
 			logger.Errorf("JikanClient", "GetAnimeProducers failed on page %d: %v", page, err)
 			return nil, errors.New("failed to fetch anime producers from Jikan API")
@@ -280,6 +279,8 @@ func GetAnimeProducers() (*types.JikanProducersResponse, error) {
 		if response.Pagination.LastVisiblePage == 0 {
 			response.Pagination = pageResponse.Pagination
 		}
+
+		logger.Debugf("JikanClient", "Fetched page (%d/%d) - %d producers", page, response.Pagination.LastVisiblePage, len(pageResponse.Data))
 
 		response.Data = append(response.Data, pageResponse.Data...)
 		hasNextPage = pageResponse.Pagination.HasNextPage
