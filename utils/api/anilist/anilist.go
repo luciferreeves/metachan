@@ -18,15 +18,21 @@ import (
 const (
 	anilistAPIBaseURL = "https://graphql.anilist.co"
 	contextTimeout    = 60 * time.Second
+	timeout           = 15 * time.Second
+	maxRetries        = 3
+	backoffDuration   = 1 * time.Second
+	contentType       = "application/json"
+	acceptHeader      = "application/json"
+	userAgent         = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 )
 
 var (
 	clientInstance = &client{
 		httpClient: &http.Client{
-			Timeout: 15 * time.Second,
+			Timeout: timeout,
 		},
-		maxRetries: 3,
-		backoff:    1 * time.Second,
+		maxRetries: maxRetries,
+		backoff:    backoffDuration,
 	}
 )
 
@@ -81,9 +87,9 @@ func (c *client) makeRequest(ctx context.Context, query string, variables map[st
 			return nil, errors.New("failed to create request to Anilist API")
 		}
 
-		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("Accept", "application/json")
-		request.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+		request.Header.Set("Content-Type", contentType)
+		request.Header.Set("Accept", acceptHeader)
+		request.Header.Set("User-Agent", userAgent)
 
 		response, err = c.httpClient.Do(request)
 		if err != nil {
@@ -310,7 +316,7 @@ func GetAnimeByAnilistID(id int) (*types.AnilistAnimeResponse, error) {
 
 	if response.Data.Media.ID == 0 {
 		logger.Errorf("AnilistClient", "No data found for Anilist ID %d", id)
-		return nil, fmt.Errorf("no data found for Anilist ID %d", id)
+		return nil, errors.New("no data found")
 	}
 
 	return &response, nil

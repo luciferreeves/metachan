@@ -17,15 +17,19 @@ import (
 const (
 	malsyncAPIBaseURL = "https://api.malsync.moe/mal"
 	contextTimeout    = 10 * time.Second
+	timeout           = 10 * time.Second
+	maxRetries        = 3
+	backoffDuration   = 1 * time.Second
+	acceptHeader      = "application/json"
 )
 
 var (
 	clientInstance = &client{
 		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: timeout,
 		},
-		maxRetries: 3,
-		backoff:    1 * time.Second,
+		maxRetries: maxRetries,
+		backoff:    backoffDuration,
 	}
 )
 
@@ -69,7 +73,7 @@ func (c *client) makeRequest(ctx context.Context, url string) ([]byte, error) {
 			return nil, errors.New("failed to create request to Malsync API")
 		}
 
-		request.Header.Set("Accept", "application/json")
+		request.Header.Set("Accept", acceptHeader)
 
 		response, err = c.httpClient.Do(request)
 		if err != nil {
@@ -140,7 +144,7 @@ func GetAnimeByMALID(malID int) (*types.MalsyncAnimeResponse, error) {
 
 	if response.ID == 0 {
 		logger.Errorf("MalsyncClient", "Received empty response for MAL ID %d", malID)
-		return nil, fmt.Errorf("received empty response for MAL ID %d", malID)
+		return nil, errors.New("received empty response")
 	}
 
 	return &response, nil

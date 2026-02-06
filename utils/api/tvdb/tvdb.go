@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"metachan/config"
-	"metachan/database"
 	"metachan/entities"
 	"metachan/types"
 	"metachan/utils/logger"
@@ -14,206 +14,186 @@ import (
 	"time"
 )
 
-var tvdbToken string
-var tvdbTokenExpiry time.Time
+const (
+	tvdbAPIBaseURL    = "https://api4.thetvdb.com/v4"
+	tvdbLoginEndpoint = "/login"
+	tvdbImageBaseURL  = "https://artworks.thetvdb.com"
+	timeout           = 10 * time.Second
+	episodesTimeout   = 15 * time.Second
+	tokenExpiry       = 24 * time.Hour
+	contentType       = "application/json"
+	acceptHeader      = "application/json"
+	noDescription     = "No description available"
+	recapType         = "recap"
+)
 
-// authenticateTVDB authenticates with TVDB API and returns a token
-func authenticateTVDB() (string, error) {
-	// Check if we have a valid token
-	if tvdbToken != "" && time.Now().Before(tvdbTokenExpiry) {
-		return tvdbToken, nil
+var (
+	clientInstance = &client{
+		httpClient: &http.Client{
+			Timeout: timeout,
+		},
+	}
+)
+
+func authenticate() (string, error) {
+	if clientInstance.token != "" && time.Now().Before(clientInstance.tokenExpiry) {
+		return clientInstance.token, nil
 	}
 
-	if config.Config.TVDB.APIKey == "" {
-		return "", fmt.Errorf("TVDB API key is not set")
+	if config.API.TVDBKey == "" {
+		logger.Errorf("TVDB", "TVDB API key is not set")
+		return "", errors.New("TVDB API key is not set")
 	}
 
-	logger.Log("Authenticating with TVDB API", logger.LogOptions{
-		Level:  logger.Debug,
-		Prefix: "TVDB",
-	})
+	logger.Debugf("TVDB", "Authenticating with TVDB API")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-
-	// Create request body with apikey
-	authBody := map[string]string{"apikey": config.Config.TVDB.APIKey}
+	authBody := map[string]string{"apikey": config.API.TVDBKey}
 	jsonBody, err := json.Marshal(authBody)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal auth body: %w", err)
+		logger.Errorf("TVDB", "Failed to marshal auth body: %v", err)
+		return "", errors.New("failed to marshal auth body")
 	}
 
-	req, err := http.NewRequest("POST", "https://api4.thetvdb.com/v4/login", bytes.NewBuffer(jsonBody))
+	req, err := http.NewRequest("POST", tvdbAPIBaseURL+tvdbLoginEndpoint, bytes.NewBuffer(jsonBody))
 	if err != nil {
-		return "", fmt.Errorf("failed to create auth request: %w", err)
+		logger.Errorf("TVDB", "Failed to create auth request: %v", err)
+		return "", errors.New("failed to create auth request")
 	}
 
-	req.Header.Add("Content-Type", "application/json")
+	req.Header.Add("Content-Type", contentType)
 
-	resp, err := client.Do(req)
+	resp, err := clientInstance.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to authenticate: %w", err)
+		logger.Errorf("TVDB", "Failed to authenticate: %v", err)
+		return "", errors.New("failed to authenticate")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("authentication failed with status: %d", resp.StatusCode)
+		logger.Errorf("TVDB", "Authentication failed with status: %d", resp.StatusCode)
+		return "", errors.New("authentication failed")
 	}
 
-	var authResp TVDBAuthResponse
+	var authResp types.TVDBAuthResponse
 	if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
-		return "", fmt.Errorf("failed to decode auth response: %w", err)
+		logger.Errorf("TVDB", "Failed to decode auth response: %v", err)
+		return "", errors.New("failed to decode auth response")
 	}
 
 	if authResp.Data.Token == "" {
-		return "", fmt.Errorf("no token received from TVDB")
+		logger.Errorf("TVDB", "No token received from TVDB")
+		return "", errors.New("no token received from TVDB")
 	}
 
-	// Store token and set expiry (TVDB tokens typically last 30 days, but we'll refresh after 24 hours to be safe)
-	tvdbToken = authResp.Data.Token
-	tvdbTokenExpiry = time.Now().Add(24 * time.Hour)
+	clientInstance.token = authResp.Data.Token
+	clientInstance.tokenExpiry = time.Now().Add(tokenExpiry)
 
-	logger.Log("Successfully authenticated with TVDB", logger.LogOptions{
-		Level:  logger.Success,
-		Prefix: "TVDB",
-	})
+	logger.Successf("TVDB", "Successfully authenticated with TVDB")
 
-	return tvdbToken, nil
+	return clientInstance.token, nil
 }
 
-// GetSeriesEpisodes fetches all episodes for a TVDB series
-func GetSeriesEpisodes(tvdbID int) ([]TVDBEpisode, error) {
-	token, err := authenticateTVDB()
+func GetSeriesEpisodes(tvdbID int) ([]types.TVDBEpisode, error) {
+	token, err := authenticate()
 	if err != nil {
-		return nil, fmt.Errorf("failed to authenticate with TVDB: %w", err)
+		logger.Errorf("TVDB", "Failed to authenticate with TVDB for series %d: %v", tvdbID, err)
+		return nil, errors.New("failed to authenticate with TVDB")
 	}
 
-	logger.Log(fmt.Sprintf("Fetching episodes for TVDB series %d", tvdbID), logger.LogOptions{
-		Level:  logger.Debug,
-		Prefix: "TVDB",
-	})
+	logger.Debugf("TVDB", "Fetching episodes for TVDB series %d", tvdbID)
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	tempClient := &http.Client{Timeout: episodesTimeout}
 
-	// TVDB v4 API endpoint for episodes
-	url := fmt.Sprintf("https://api4.thetvdb.com/v4/series/%d/episodes/default", tvdbID)
+	url := fmt.Sprintf("%s/series/%d/episodes/default", tvdbAPIBaseURL, tvdbID)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		logger.Errorf("TVDB", "Failed to create request for series %d: %v", tvdbID, err)
+		return nil, errors.New("failed to create request")
 	}
 
 	req.Header.Add("Authorization", "Bearer "+token)
-	req.Header.Add("Accept", "application/json")
+	req.Header.Add("Accept", acceptHeader)
 
-	resp, err := client.Do(req)
+	resp, err := tempClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch episodes: %w", err)
+		logger.Errorf("TVDB", "Failed to fetch episodes for series %d: %v", tvdbID, err)
+		return nil, errors.New("failed to fetch episodes")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to fetch episodes with status: %d", resp.StatusCode)
+		logger.Errorf("TVDB", "Failed to fetch episodes with status: %d", resp.StatusCode)
+		return nil, errors.New("failed to fetch episodes")
 	}
 
-	var episodesResp TVDBEpisodesResponse
+	var episodesResp types.TVDBEpisodesResponse
 	if err := json.NewDecoder(resp.Body).Decode(&episodesResp); err != nil {
-		return nil, fmt.Errorf("failed to decode episodes response: %w", err)
+		logger.Errorf("TVDB", "Failed to decode episodes response for series %d: %v", tvdbID, err)
+		return nil, errors.New("failed to decode episodes response")
 	}
 
-	logger.Log(fmt.Sprintf("Successfully fetched %d episodes from TVDB for series %d", len(episodesResp.Data.Episodes), tvdbID), logger.LogOptions{
-		Level:  logger.Success,
-		Prefix: "TVDB",
-	})
+	logger.Successf("TVDB", "Successfully fetched %d episodes from TVDB for series %d", len(episodesResp.Data.Episodes), tvdbID)
 
 	return episodesResp.Data.Episodes, nil
 }
 
-// ConvertTVDBEpisodesToAnimeEpisodes converts TVDB episodes to anime episode format
-func ConvertTVDBEpisodesToAnimeEpisodes(tvdbEpisodes []TVDBEpisode) []types.AnimeSingleEpisode {
-	var animeEpisodes []types.AnimeSingleEpisode
+func EnrichEpisodesFromTVDB(anime *entities.Anime, tvdbEpisodes []types.TVDBEpisode) {
+	if anime == nil || len(anime.Episodes) == 0 {
+		return
+	}
 
-	const tvdbImageBaseURL = "https://artworks.thetvdb.com"
+	malID := anime.MALID
 
-	for _, ep := range tvdbEpisodes {
-		// Generate episode ID from name
-		titles := types.EpisodeTitles{
-			English:  ep.Name,
-			Japanese: "",
-			Romaji:   "",
+	for i, ep := range tvdbEpisodes {
+		if i >= len(anime.Episodes) {
+			break
 		}
 
-		thumbnailURL := ""
+		episode := &anime.Episodes[i]
+
+		if episode.Title == nil {
+			episode.Title = &entities.Title{}
+		}
+		if ep.Name != "" {
+			episode.Title.English = ep.Name
+		}
+
 		if ep.Image != "" {
-			thumbnailURL = ep.Image
+			episode.ThumbnailURL = ep.Image
 		}
 
-		description := ep.Overview
-		if description == "" {
-			description = "No description available"
+		if ep.Overview != "" {
+			episode.Description = ep.Overview
+		} else {
+			episode.Description = noDescription
 		}
 
-		isRecap := false
-		if ep.FinaleType != nil && *ep.FinaleType == "recap" {
-			isRecap = true
+		if ep.Aired != "" {
+			episode.Aired = ep.Aired
 		}
 
-		animeEpisodes = append(animeEpisodes, types.AnimeSingleEpisode{
-			ID:           generateEpisodeID(titles),
-			Titles:       titles,
-			Description:  description,
-			Aired:        ep.Aired,
-			ThumbnailURL: thumbnailURL,
-			Score:        0,
-			Filler:       false,
-			Recap:        isRecap,
-			ForumURL:     "",
-			URL:          "",
-		})
+		if ep.FinaleType != nil && *ep.FinaleType == recapType {
+			episode.Recap = true
+		}
+
+		episode.EpisodeNumber = ep.Number
+		episode.EpisodeLength = float64(ep.Runtime)
+
+		titleForID := ep.Name
+		if titleForID == "" && episode.Title != nil {
+			if episode.Title.English != "" {
+				titleForID = episode.Title.English
+			} else if episode.Title.Romaji != "" {
+				titleForID = episode.Title.Romaji
+			}
+		}
+		episode.EpisodeID = generateEpisodeID(malID, ep.Number, titleForID)
 	}
-
-	return animeEpisodes
 }
 
-// generateEpisodeID creates a unique episode ID from titles
-func generateEpisodeID(titles types.EpisodeTitles) string {
-	var title string
-	if titles.English != "" {
-		title = titles.English
-	} else if titles.Romaji != "" {
-		title = titles.Romaji
-	} else {
-		title = titles.Japanese
-	}
-
-	// MD5 hash for ID generation to match Jikan episode IDs
-	hash := md5.Sum([]byte(title))
+func generateEpisodeID(malID int, episodeNumber int, title string) string {
+	uniqueString := fmt.Sprintf("%d-%d-%s", malID, episodeNumber, title)
+	hash := md5.Sum([]byte(uniqueString))
 	return fmt.Sprintf("%x", hash)
-}
-
-// FindSeasonMappings finds all anime mappings that belong to the same series based on TVDB ID
-func FindSeasonMappings(tvdbID int) ([]entities.AnimeMapping, error) {
-	logger.Log(fmt.Sprintf("Finding season mappings for TVDB ID %d", tvdbID), logger.LogOptions{
-		Level:  logger.Debug,
-		Prefix: "TVDB",
-	})
-
-	// Use our database function to find all mappings with the same TVDB ID
-	mappings, err := database.GetAnimeMappingsByTVDBID(tvdbID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get season mappings: %w", err)
-	}
-
-	if len(mappings) == 0 {
-		logger.Log(fmt.Sprintf("No season mappings found for TVDB ID %d", tvdbID), logger.LogOptions{
-			Level:  logger.Debug,
-			Prefix: "TVDB",
-		})
-	} else {
-		logger.Log(fmt.Sprintf("Found %d season mappings for TVDB ID %d", len(mappings), tvdbID), logger.LogOptions{
-			Level:  logger.Info,
-			Prefix: "TVDB",
-		})
-	}
-
-	return mappings, nil
 }

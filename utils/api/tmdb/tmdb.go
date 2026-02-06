@@ -3,9 +3,11 @@ package tmdb
 import (
 	"crypto/md5"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"metachan/config"
+	"metachan/entities"
 	"metachan/types"
 	"metachan/utils/logger"
 	"net/http"
@@ -14,86 +16,84 @@ import (
 )
 
 const (
-	MAX_RETRIES = 10
+	tmdbAPIBaseURL          = "https://api.themoviedb.org/3"
+	tmdbImageBaseURL        = "https://image.tmdb.org/t/p/"
+	searchTVEndpoint        = "/search/tv"
+	searchMovieEndpoint     = "/search/movie"
+	tvDetailsEndpoint       = "/tv/%d"
+	seasonDetailsEndpoint   = "/tv/%d/season/%d"
+	movieDetailsEndpoint    = "/movie/%d"
+	timeout                 = 5 * time.Second
+	rateLimitWait           = 5 * time.Second
+	maxRetries              = 10
+	maxEnrichmentDuration   = 10 * time.Second
+	thumbnailSize           = "w300"
+	backdropSize            = "w780"
+	acceptHeader            = "application/json"
+	connectionResetError    = "connection reset"
+	noDescription           = "No description available"
+	tvAnimation             = "TV Animation"
+	seasonSuffix            = ": Season"
+	seasonWord              = "Season"
+	partWord                = "Part"
+	courWord                = "Cour"
+	countryPriorityJP       = "JP"
+	episodeCountFlexibility = 2
 )
 
-// makeSimpleRequest executes a simple HTTP request with retries for both connection and rate limit errors
-func makeSimpleRequest(req *http.Request) (*http.Response, error) {
-	// Create a simple HTTP client with a short timeout
-	client := &http.Client{
-		Timeout: 5 * time.Second, // Reduced timeout for faster failure
+var (
+	clientInstance = &client{
+		httpClient: &http.Client{
+			Timeout: timeout,
+		},
 	}
+)
 
-	// Do retries for up to MAX_RETRIES attempts
+func makeRequest(req *http.Request) (*http.Response, error) {
 	var lastErr error
 	var resp *http.Response
 
-	for attempt := 0; attempt < MAX_RETRIES; attempt++ {
-		// Log the attempt
-		// Execute the request
-		resp, lastErr = client.Do(req)
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		resp, lastErr = clientInstance.httpClient.Do(req)
 
-		// If successful, check for rate limiting
 		if lastErr == nil {
-			// If we got rate limited (429), wait and retry
 			if resp.StatusCode == http.StatusTooManyRequests {
 				resp.Body.Close()
-
-				logger.Log(fmt.Sprintf("TMDB rate limited (attempt %d/%d): waiting 5 seconds", attempt+1, MAX_RETRIES), logger.LogOptions{
-					Level:  logger.Warn,
-					Prefix: "TMDB",
-				})
-
-				// Wait for 5 seconds before retrying for rate limits
-				time.Sleep(5 * time.Second)
+				logger.Warnf("TMDB", "TMDB rate limited (attempt %d/%d): waiting %d seconds", attempt+1, maxRetries, int(rateLimitWait.Seconds()))
+				time.Sleep(rateLimitWait)
 				continue
 			}
-
-			// Any other status code (including success) should be returned
 			return resp, nil
 		}
 
-		// Check if this is a connection reset error for immediate retry
-		if strings.Contains(lastErr.Error(), "connection reset") {
-			logger.Log(fmt.Sprintf("TMDB connection reset (attempt %d/%d): retrying immediately", attempt+1, MAX_RETRIES), logger.LogOptions{
-				Level:  logger.Debug,
-				Prefix: "TMDB",
-			})
+		if strings.Contains(lastErr.Error(), connectionResetError) {
+			logger.Debugf("TMDB", "TMDB connection reset (attempt %d/%d): retrying immediately", attempt+1, maxRetries)
 			continue
 		}
 
-		// Log the error
-		logger.Log(fmt.Sprintf("TMDB request error (attempt %d/%d): %v", attempt+1, MAX_RETRIES, lastErr), logger.LogOptions{
-			Level:  logger.Debug,
-			Prefix: "TMDB",
-		})
+		logger.Debugf("TMDB", "TMDB request error (attempt %d/%d): %v", attempt+1, maxRetries, lastErr)
 	}
 
-	// All attempts failed, return the last error
-	return nil, fmt.Errorf("failed after %d retry attempts: %w", MAX_RETRIES, lastErr)
+	logger.Errorf("TMDB", "Failed after %d retry attempts: %v", maxRetries, lastErr)
+	return nil, errors.New("failed after max retry attempts")
 }
 
-// normalizeTitle cleans up the anime title for better matching with TMDB
 func normalizeTitle(title string) string {
-	// Handle empty titles
 	if title == "" {
 		return ""
 	}
 
-	// Remove common suffixes and prefixes
 	normalized := title
-	normalized = strings.Replace(normalized, "TV Animation", "", -1)
-	normalized = strings.Replace(normalized, ": Season", "", -1)
-	normalized = strings.Replace(normalized, "Season", "", -1)
-	normalized = strings.Replace(normalized, "Part", "", -1)
-	normalized = strings.Replace(normalized, "Cour", "", -1)
+	normalized = strings.Replace(normalized, tvAnimation, "", -1)
+	normalized = strings.Replace(normalized, seasonSuffix, "", -1)
+	normalized = strings.Replace(normalized, seasonWord, "", -1)
+	normalized = strings.Replace(normalized, partWord, "", -1)
+	normalized = strings.Replace(normalized, courWord, "", -1)
 
-	// Handle patterns like "Dr. Stone: Stone Wars" -> "Dr. Stone"
 	if colonIndex := strings.Index(normalized, ":"); colonIndex > 0 {
 		normalized = normalized[:colonIndex]
 	}
 
-	// Remove parentheses and text inside them
 	for {
 		openParen := strings.Index(normalized, "(")
 		if openParen == -1 {
@@ -109,68 +109,61 @@ func normalizeTitle(title string) string {
 	return strings.TrimSpace(normalized)
 }
 
-// searchTVShowsByTitle searches for TV shows on TMDB by title
-func searchTVShowsByTitle(title string, alternativeTitle string, isAdult bool, countryPriority string) ([]TMDBShowResult, error) {
-	if config.Config.TMDB.ReadAccessToken == "" {
-		return nil, fmt.Errorf("TMDB is not initialized")
+func searchTVShowsByTitle(title string, alternativeTitle string, isAdult bool, countryPriority string) ([]types.TMDBShowResult, error) {
+	if config.API.TMDBReadToken == "" {
+		logger.Errorf("TMDB", "TMDB is not initialized")
+		return nil, errors.New("TMDB is not initialized")
 	}
 
-	// Normalize the title
 	query := normalizeTitle(title)
 	if query == "" && alternativeTitle != "" {
 		query = normalizeTitle(alternativeTitle)
 	}
 
-	logger.Log(fmt.Sprintf("Searching TMDB for TV show: %s", query), logger.LogOptions{
-		Level:  logger.Debug,
-		Prefix: "TMDB",
-	})
+	logger.Debugf("TMDB", "Searching TMDB for TV show: %s", query)
 
-	// Create request
-	apiURL := "https://api.themoviedb.org/3/search/tv"
+	apiURL := tmdbAPIBaseURL + searchTVEndpoint
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		logger.Errorf("TMDB", "Failed to create request: %v", err)
+		return nil, errors.New("failed to create request")
 	}
 
-	// Add query parameters
 	q := req.URL.Query()
 	q.Add("query", query)
 	req.URL.RawQuery = q.Encode()
 
-	// Add headers
-	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.Config.TMDB.ReadAccessToken))
-	req.Header.Add("Accept", "application/json")
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.API.TMDBReadToken))
+	req.Header.Add("Accept", acceptHeader)
 
-	// Make the simple request
-	resp, err := makeSimpleRequest(req)
+	resp, err := makeRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to search TV shows: %w", err)
+		logger.Errorf("TMDB", "Failed to search TV shows: %v", err)
+		return nil, errors.New("failed to search TV shows")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to search TV shows: %s", resp.Status)
+		logger.Errorf("TMDB", "Failed to search TV shows: %s", resp.Status)
+		return nil, errors.New("failed to search TV shows")
 	}
 
-	// Parse response
-	var searchResponse TMDBSearchResponse
+	var searchResponse types.TMDBSearchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&searchResponse); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+		logger.Errorf("TMDB", "Failed to decode response: %v", err)
+		return nil, errors.New("failed to decode response")
 	}
 
-	// Filter results if needed
-	var filteredResults []TMDBShowResult
+	var filteredResults []types.TMDBShowResult
 	for _, show := range searchResponse.Results {
 		if (isAdult && show.Adult) || (!isAdult && !show.Adult) {
 			filteredResults = append(filteredResults, show)
 		}
 	}
 
-	// Sort by country priority if specified
 	if countryPriority != "" && len(filteredResults) > 0 {
-		var prioritizedResults []TMDBShowResult
-		var otherResults []TMDBShowResult
+		var prioritizedResults []types.TMDBShowResult
+		var otherResults []types.TMDBShowResult
 
 		for _, show := range filteredResults {
 			hasPriority := false
@@ -188,211 +181,191 @@ func searchTVShowsByTitle(title string, alternativeTitle string, isAdult bool, c
 			}
 		}
 
-		// Combine the results with prioritized ones first
 		filteredResults = append(prioritizedResults, otherResults...)
 	}
 
 	if len(filteredResults) == 0 {
-		logger.Log(fmt.Sprintf("No TMDB shows found for: %s", query), logger.LogOptions{
-			Level:  logger.Warn,
-			Prefix: "TMDB",
-		})
+		logger.Warnf("TMDB", "No TMDB shows found for: %s", query)
 	} else {
-		logger.Log(fmt.Sprintf("Found %d TMDB shows for: %s", len(filteredResults), query), logger.LogOptions{
-			Level:  logger.Debug,
-			Prefix: "TMDB",
-		})
+		logger.Debugf("TMDB", "Found %d TMDB shows for: %s", len(filteredResults), query)
 	}
 
 	return filteredResults, nil
 }
 
-// getTVShowDetails gets details for a TV show from TMDB
-func getTVShowDetails(showID int) (*TMDBShowDetails, error) {
-	if config.Config.TMDB.ReadAccessToken == "" {
-		return nil, fmt.Errorf("TMDB is not initialized")
+func getTVShowDetails(showID int) (*types.TMDBShowDetails, error) {
+	if config.API.TMDBReadToken == "" {
+		logger.Errorf("TMDB", "TMDB is not initialized")
+		return nil, errors.New("TMDB is not initialized")
 	}
 
-	apiURL := fmt.Sprintf("https://api.themoviedb.org/3/tv/%d", showID)
+	apiURL := fmt.Sprintf(tmdbAPIBaseURL+tvDetailsEndpoint, showID)
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		logger.Errorf("TMDB", "Failed to create request: %v", err)
+		return nil, errors.New("failed to create request")
 	}
 
-	// Add headers
-	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.Config.TMDB.ReadAccessToken))
-	req.Header.Add("Accept", "application/json")
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.API.TMDBReadToken))
+	req.Header.Add("Accept", acceptHeader)
 
-	// Make the simple request
-	resp, err := makeSimpleRequest(req)
+	resp, err := makeRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get TV show details: %w", err)
+		logger.Errorf("TMDB", "Failed to get TV show details: %v", err)
+		return nil, errors.New("failed to get TV show details")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get TV show details: %s", resp.Status)
+		logger.Errorf("TMDB", "Failed to get TV show details: %s", resp.Status)
+		return nil, errors.New("failed to get TV show details")
 	}
 
-	// Parse response
-	details := &TMDBShowDetails{}
+	details := &types.TMDBShowDetails{}
 	if err := json.NewDecoder(resp.Body).Decode(details); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+		logger.Errorf("TMDB", "Failed to decode response: %v", err)
+		return nil, errors.New("failed to decode response")
 	}
 
 	return details, nil
 }
 
-// getSeasonDetails gets details for a TV season from TMDB
-func getSeasonDetails(showID, seasonNumber int) (*TMDBSeasonDetails, error) {
-	if config.Config.TMDB.ReadAccessToken == "" {
-		return nil, fmt.Errorf("TMDB is not initialized")
+func getSeasonDetails(showID, seasonNumber int) (*types.TMDBSeasonDetails, error) {
+	if config.API.TMDBReadToken == "" {
+		logger.Errorf("TMDB", "TMDB is not initialized")
+		return nil, errors.New("TMDB is not initialized")
 	}
 
-	apiURL := fmt.Sprintf("https://api.themoviedb.org/3/tv/%d/season/%d", showID, seasonNumber)
+	apiURL := fmt.Sprintf(tmdbAPIBaseURL+seasonDetailsEndpoint, showID, seasonNumber)
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		logger.Errorf("TMDB", "Failed to create request: %v", err)
+		return nil, errors.New("failed to create request")
 	}
 
-	// Add headers
-	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.Config.TMDB.ReadAccessToken))
-	req.Header.Add("Accept", "application/json")
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.API.TMDBReadToken))
+	req.Header.Add("Accept", acceptHeader)
 
-	// Make the simple request
-	resp, err := makeSimpleRequest(req)
+	resp, err := makeRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get season details: %w", err)
+		logger.Errorf("TMDB", "Failed to get season details: %v", err)
+		return nil, errors.New("failed to get season details")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get season details: %s", resp.Status)
+		logger.Errorf("TMDB", "Failed to get season details: %s", resp.Status)
+		return nil, errors.New("failed to get season details")
 	}
 
-	// Parse response
-	details := &TMDBSeasonDetails{}
+	details := &types.TMDBSeasonDetails{}
 	if err := json.NewDecoder(resp.Body).Decode(details); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+		logger.Errorf("TMDB", "Failed to decode response: %v", err)
+		return nil, errors.New("failed to decode response")
 	}
 
 	return details, nil
 }
 
-// findBestSeason finds the best matching season for an anime
-func findBestSeason(shows []TMDBShowResult, title string, episodeCount int, airDate string) (int, int, error) {
+func findBestSeason(shows []types.TMDBShowResult, title string, episodeCount int, airDate string) (int, int, error) {
 	for _, show := range shows {
 		showDetails, err := getTVShowDetails(show.ID)
 		if err != nil {
-			logger.Log(fmt.Sprintf("Failed to get details for show %d: %v", show.ID, err), logger.LogOptions{
-				Level:  logger.Warn,
-				Prefix: "TMDB",
-			})
+			logger.Warnf("TMDB", "Failed to get details for show %d: %v", show.ID, err)
 			continue
 		}
 
 		for _, season := range showDetails.Seasons {
-			// Skip season 0 (usually specials)
 			if season.SeasonNumber == 0 {
 				continue
 			}
 
-			// Check if episode count matches (with some flexibility)
 			episodeCountMatches := season.EpisodeCount == episodeCount ||
-				(episodeCount > 0 && season.EpisodeCount >= episodeCount-2 &&
-					season.EpisodeCount <= episodeCount+2)
+				(episodeCount > 0 && season.EpisodeCount >= episodeCount-episodeCountFlexibility &&
+					season.EpisodeCount <= episodeCount+episodeCountFlexibility)
 
-			// Check if air dates are close
 			airDateMatches := false
 			if airDate != "" && season.AirDate != "" {
-				// Simple year comparison
 				animeYear := airDate[:4]
 				seasonYear := season.AirDate[:4]
 				airDateMatches = animeYear == seasonYear
 			}
 
-			// If either count or air date matches, consider it a potential match
 			if episodeCountMatches || airDateMatches {
-				logger.Log(fmt.Sprintf("Found matching season for \"%s\": Show ID %d, Season %d",
-					title, show.ID, season.SeasonNumber), logger.LogOptions{
-					Level:  logger.Info,
-					Prefix: "TMDB",
-				})
+				logger.Infof("TMDB", "Found matching season for \"%s\": Show ID %d, Season %d", title, show.ID, season.SeasonNumber)
 				return show.ID, season.SeasonNumber, nil
 			}
 		}
 	}
 
-	return 0, 0, fmt.Errorf("could not find matching season for: %s", title)
+	logger.Warnf("TMDB", "Could not find matching season for: %s", title)
+	return 0, 0, errors.New("could not find matching season")
 }
 
-// AttachEpisodeDescriptions enriches anime episodes with descriptions and thumbnails from TMDB
-func AttachEpisodeDescriptions(title string, episodes []types.AnimeSingleEpisode, alternativeTitle string, tmdbID int) ([]types.AnimeSingleEpisode, error) {
-	if config.Config.TMDB.ReadAccessToken == "" {
-		logger.Log("TMDB is not configured, skipping episode description enrichment", logger.LogOptions{
-			Level:  logger.Warn,
-			Prefix: "TMDB",
-		})
-		return episodes, fmt.Errorf("TMDB is not configured")
+func AttachEpisodeDescriptions(anime *entities.Anime) error {
+	if config.API.TMDBReadToken == "" {
+		logger.Warnf("TMDB", "TMDB is not configured, skipping episode description enrichment")
+		return errors.New("TMDB is not configured")
 	}
 
-	if len(episodes) == 0 {
-		return episodes, nil
+	if anime == nil || len(anime.Episodes) == 0 {
+		return nil
 	}
 
-	logger.Log(fmt.Sprintf("Enriching episodes for: %s", title), logger.LogOptions{
-		Level:  logger.Info,
-		Prefix: "TMDB",
-	})
+	title := ""
+	alternativeTitle := ""
+	if anime.Title != nil {
+		title = anime.Title.Romaji
+		alternativeTitle = anime.Title.English
+	}
+
+	tmdbID := 0
+	malID := anime.MALID
+	if anime.Mapping != nil {
+		tmdbID = anime.Mapping.TMDB
+	}
+
+	episodes := make([]*entities.Episode, len(anime.Episodes))
+	for i := range anime.Episodes {
+		episodes[i] = &anime.Episodes[i]
+	}
+
+	logger.Infof("TMDB", "Enriching episodes for: %s", title)
 
 	var showID int
 	var seasonNumber int
 	var err error
 
-	// Use a short timeout for the entire operation
 	startTime := time.Now()
-	maxDuration := 10 * time.Second
 
-	// If we have a TMDB ID, use it directly
 	if tmdbID > 0 {
 		showID = tmdbID
 
-		// Check if we've exceeded the timeout
-		if time.Since(startTime) > maxDuration {
-			logger.Log("TMDB enrichment timed out", logger.LogOptions{
-				Level:  logger.Warn,
-				Prefix: "TMDB",
-			})
-			return episodes, fmt.Errorf("TMDB enrichment timed out")
+		if time.Since(startTime) > maxEnrichmentDuration {
+			logger.Warnf("TMDB", "TMDB enrichment timed out")
+			return errors.New("TMDB enrichment timed out")
 		}
 
-		// Try to get show details and find the best season
 		showDetails, err := getTVShowDetails(showID)
 		if err != nil {
-			logger.Log(fmt.Sprintf("Failed to get TMDB show details for ID %d: %v", tmdbID, err), logger.LogOptions{
-				Level:  logger.Warn,
-				Prefix: "TMDB",
-			})
-			return episodes, fmt.Errorf("failed to get TMDB show details: %w", err)
+			logger.Warnf("TMDB", "Failed to get TMDB show details for ID %d: %v", tmdbID, err)
+			return errors.New("failed to get TMDB show details")
 		}
 
-		// Find the best matching season - prefer the first season if we can't determine
 		seasonNumber = 1
 		bestMatchScore := 0
 
 		for _, season := range showDetails.Seasons {
 			if season.SeasonNumber == 0 {
-				continue // Skip specials
+				continue
 			}
 
 			matchScore := 0
 
-			// Check episode count similarity
-			if math.Abs(float64(season.EpisodeCount-len(episodes))) <= 2 {
+			if math.Abs(float64(season.EpisodeCount-len(episodes))) <= episodeCountFlexibility {
 				matchScore += 2
 			}
 
-			// Check air date if available
 			if len(episodes) > 0 && episodes[0].Aired != "" && season.AirDate != "" {
 				animeYear := episodes[0].Aired[:4]
 				seasonYear := season.AirDate[:4]
@@ -407,129 +380,101 @@ func AttachEpisodeDescriptions(title string, episodes []types.AnimeSingleEpisode
 			}
 		}
 
-		logger.Log(fmt.Sprintf("Using TMDB ID %d with season %d", showID, seasonNumber), logger.LogOptions{
-			Level:  logger.Info,
-			Prefix: "TMDB",
-		})
+		logger.Infof("TMDB", "Using TMDB ID %d with season %d", showID, seasonNumber)
 	} else {
-		// Check if we've exceeded the timeout
-		if time.Since(startTime) > maxDuration {
-			logger.Log("TMDB enrichment timed out", logger.LogOptions{
-				Level:  logger.Warn,
-				Prefix: "TMDB",
-			})
-			return episodes, fmt.Errorf("TMDB enrichment timed out")
+		if time.Since(startTime) > maxEnrichmentDuration {
+			logger.Warnf("TMDB", "TMDB enrichment timed out")
+			return errors.New("TMDB enrichment timed out")
 		}
 
-		// Search for the TV show on TMDB if we don't have a direct ID
-		shows, err := searchTVShowsByTitle(title, alternativeTitle, false, "JP")
+		shows, err := searchTVShowsByTitle(title, alternativeTitle, false, countryPriorityJP)
 		if err != nil {
-			logger.Log(fmt.Sprintf("Failed to search TV shows: %v", err), logger.LogOptions{
-				Level:  logger.Warn,
-				Prefix: "TMDB",
-			})
-			return episodes, fmt.Errorf("failed to search TMDB shows: %w", err)
+			logger.Warnf("TMDB", "Failed to search TV shows: %v", err)
+			return errors.New("failed to search TMDB shows")
 		}
 
 		if len(shows) == 0 {
-			logger.Log(fmt.Sprintf("No TV shows found for: %s", title), logger.LogOptions{
-				Level:  logger.Warn,
-				Prefix: "TMDB",
-			})
-			return episodes, fmt.Errorf("no TMDB shows found for: %s", title)
+			logger.Warnf("TMDB", "No TV shows found for: %s", title)
+			return errors.New("no TMDB shows found")
 		}
 
-		// Find the best matching season
 		airDate := ""
 		if len(episodes) > 0 && episodes[0].Aired != "" {
 			airDate = episodes[0].Aired
 		}
 
-		// Check if we've exceeded the timeout
-		if time.Since(startTime) > maxDuration {
-			logger.Log("TMDB enrichment timed out", logger.LogOptions{
-				Level:  logger.Warn,
-				Prefix: "TMDB",
-			})
-			return episodes, fmt.Errorf("TMDB enrichment timed out")
+		if time.Since(startTime) > maxEnrichmentDuration {
+			logger.Warnf("TMDB", "TMDB enrichment timed out")
+			return errors.New("TMDB enrichment timed out")
 		}
 
 		showID, seasonNumber, err = findBestSeason(shows, title, len(episodes), airDate)
 		if err != nil {
-			logger.Log(fmt.Sprintf("Failed to find best season: %v", err), logger.LogOptions{
-				Level:  logger.Warn,
-				Prefix: "TMDB",
-			})
-			return episodes, fmt.Errorf("failed to find best season: %w", err)
+			logger.Warnf("TMDB", "Failed to find best season: %v", err)
+			return errors.New("failed to find best season")
 		}
 	}
 
-	// Check if we've exceeded the timeout
-	if time.Since(startTime) > maxDuration {
-		logger.Log("TMDB enrichment timed out", logger.LogOptions{
-			Level:  logger.Warn,
-			Prefix: "TMDB",
-		})
-		return episodes, fmt.Errorf("TMDB enrichment timed out")
+	if time.Since(startTime) > maxEnrichmentDuration {
+		logger.Warnf("TMDB", "TMDB enrichment timed out")
+		return errors.New("TMDB enrichment timed out")
 	}
 
-	// Get season details with episode information
 	seasonDetails, err := getSeasonDetails(showID, seasonNumber)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Failed to get season details: %v", err), logger.LogOptions{
-			Level:  logger.Warn,
-			Prefix: "TMDB",
-		})
-		return episodes, fmt.Errorf("failed to get season details: %w", err)
+		logger.Warnf("TMDB", "Failed to get season details: %v", err)
+		return errors.New("failed to get season details")
 	}
 
-	// Enrich episodes with descriptions and thumbnails
 	tmdbEpisodes := seasonDetails.Episodes
-	enrichedEpisodes := make([]types.AnimeSingleEpisode, len(episodes))
-	copy(enrichedEpisodes, episodes)
 
-	// The base URL for TMDB images
-	const tmdbImageBaseURL = "https://image.tmdb.org/t/p/"
-	const thumbnailSize = "w300" // Use w300 size for episode thumbnails
-
-	for i := range enrichedEpisodes {
+	for i, episode := range episodes {
 		if i < len(tmdbEpisodes) {
-			// Only add description if it's not empty
 			if tmdbEpisodes[i].Overview != "" {
-				enrichedEpisodes[i].Description = tmdbEpisodes[i].Overview
+				episode.Description = tmdbEpisodes[i].Overview
 			} else {
-				enrichedEpisodes[i].Description = "No description available"
+				episode.Description = noDescription
 			}
 
-			// Add thumbnail URL if available
 			if tmdbEpisodes[i].StillPath != "" {
-				enrichedEpisodes[i].ThumbnailURL = tmdbImageBaseURL + thumbnailSize + tmdbEpisodes[i].StillPath
+				episode.ThumbnailURL = tmdbImageBaseURL + thumbnailSize + tmdbEpisodes[i].StillPath
 			}
+
+			episode.EpisodeNumber = tmdbEpisodes[i].EpisodeNumber
+
+			titleForID := ""
+			if episode.Title != nil {
+				if episode.Title.English != "" {
+					titleForID = episode.Title.English
+				} else if episode.Title.Romaji != "" {
+					titleForID = episode.Title.Romaji
+				}
+			}
+			if titleForID == "" && tmdbEpisodes[i].Name != "" {
+				titleForID = tmdbEpisodes[i].Name
+			}
+			episode.EpisodeID = generateEpisodeID(malID, episode.EpisodeNumber, titleForID)
 		} else {
-			enrichedEpisodes[i].Description = "No description available"
+			episode.Description = noDescription
 		}
 	}
 
 	thumbnailCount := 0
-	for _, ep := range enrichedEpisodes {
+	for _, ep := range episodes {
 		if ep.ThumbnailURL != "" {
 			thumbnailCount++
 		}
 	}
 
-	logger.Log(fmt.Sprintf("Successfully enriched %d episodes with descriptions and %d with thumbnails for: %s",
-		len(enrichedEpisodes), thumbnailCount, title), logger.LogOptions{
-		Level:  logger.Success,
-		Prefix: "TMDB",
-	})
+	logger.Successf("TMDB", "Successfully enriched %d episodes with descriptions and %d with thumbnails for: %s", len(episodes), thumbnailCount, title)
 
-	return enrichedEpisodes, nil
+	return nil
 }
 
-// searchMoviesByTitle searches for movies on TMDB by title
-func searchMoviesByTitle(title string, alternativeTitle string) ([]TMDBMovieResult, error) {
-	if config.Config.TMDB.ReadAccessToken == "" {
-		return nil, fmt.Errorf("TMDB is not initialized")
+func searchMoviesByTitle(title string, alternativeTitle string) ([]types.TMDBMovieResult, error) {
+	if config.API.TMDBReadToken == "" {
+		logger.Errorf("TMDB", "TMDB is not initialized")
+		return nil, errors.New("TMDB is not initialized")
 	}
 
 	query := normalizeTitle(title)
@@ -537,129 +482,133 @@ func searchMoviesByTitle(title string, alternativeTitle string) ([]TMDBMovieResu
 		query = normalizeTitle(alternativeTitle)
 	}
 
-	logger.Log(fmt.Sprintf("Searching TMDB for movie: %s", query), logger.LogOptions{
-		Level:  logger.Debug,
-		Prefix: "TMDB",
-	})
+	logger.Debugf("TMDB", "Searching TMDB for movie: %s", query)
 
-	apiURL := "https://api.themoviedb.org/3/search/movie"
+	apiURL := tmdbAPIBaseURL + searchMovieEndpoint
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		logger.Errorf("TMDB", "Failed to create request: %v", err)
+		return nil, errors.New("failed to create request")
 	}
 
 	q := req.URL.Query()
 	q.Add("query", query)
 	req.URL.RawQuery = q.Encode()
 
-	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.Config.TMDB.ReadAccessToken))
-	req.Header.Add("Accept", "application/json")
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.API.TMDBReadToken))
+	req.Header.Add("Accept", acceptHeader)
 
-	resp, err := makeSimpleRequest(req)
+	resp, err := makeRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to search movies: %w", err)
+		logger.Errorf("TMDB", "Failed to search movies: %v", err)
+		return nil, errors.New("failed to search movies")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("search failed with status: %d", resp.StatusCode)
+		logger.Errorf("TMDB", "Search failed with status: %d", resp.StatusCode)
+		return nil, errors.New("search failed")
 	}
 
-	var searchResp TMDBMovieSearchResponse
+	var searchResp types.TMDBMovieSearchResponse
 	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+		logger.Errorf("TMDB", "Failed to decode response: %v", err)
+		return nil, errors.New("failed to decode response")
 	}
 
-	logger.Log(fmt.Sprintf("Found %d movie results for: %s", len(searchResp.Results), query), logger.LogOptions{
-		Level:  logger.Debug,
-		Prefix: "TMDB",
-	})
+	logger.Debugf("TMDB", "Found %d movie results for: %s", len(searchResp.Results), query)
 
 	return searchResp.Results, nil
 }
 
-// getMovieDetails fetches details for a specific movie
-func getMovieDetails(movieID int) (*TMDBMovieDetails, error) {
-	if config.Config.TMDB.ReadAccessToken == "" {
-		return nil, fmt.Errorf("TMDB is not initialized")
+func getMovieDetails(movieID int) (*types.TMDBMovieDetails, error) {
+	if config.API.TMDBReadToken == "" {
+		logger.Errorf("TMDB", "TMDB is not initialized")
+		return nil, errors.New("TMDB is not initialized")
 	}
 
-	apiURL := fmt.Sprintf("https://api.themoviedb.org/3/movie/%d", movieID)
+	apiURL := fmt.Sprintf(tmdbAPIBaseURL+movieDetailsEndpoint, movieID)
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		logger.Errorf("TMDB", "Failed to create request: %v", err)
+		return nil, errors.New("failed to create request")
 	}
 
-	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.Config.TMDB.ReadAccessToken))
-	req.Header.Add("Accept", "application/json")
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %s", config.API.TMDBReadToken))
+	req.Header.Add("Accept", acceptHeader)
 
-	resp, err := makeSimpleRequest(req)
+	resp, err := makeRequest(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch movie details: %w", err)
+		logger.Errorf("TMDB", "Failed to fetch movie details: %v", err)
+		return nil, errors.New("failed to fetch movie details")
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("request failed with status: %d", resp.StatusCode)
+		logger.Errorf("TMDB", "Request failed with status: %d", resp.StatusCode)
+		return nil, errors.New("request failed")
 	}
 
-	var movieDetails TMDBMovieDetails
+	var movieDetails types.TMDBMovieDetails
 	if err := json.NewDecoder(resp.Body).Decode(&movieDetails); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+		logger.Errorf("TMDB", "Failed to decode response: %v", err)
+		return nil, errors.New("failed to decode response")
 	}
 
 	return &movieDetails, nil
 }
 
-// GetMovieAsEpisode fetches movie details and returns it as a single episode
-func GetMovieAsEpisode(title string, alternativeTitle string, tmdbID int, malID int, japaneseTitle string, animeScore float64) ([]types.AnimeSingleEpisode, error) {
-	logger.Log(fmt.Sprintf("Fetching movie episode data for: %s", title), logger.LogOptions{
-		Level:  logger.Debug,
-		Prefix: "TMDB",
-	})
+func EnrichEpisodeFromMovie(anime *entities.Anime) error {
+	if anime == nil || len(anime.Episodes) == 0 {
+		return nil
+	}
+
+	episode := &anime.Episodes[0]
+
+	title := ""
+	alternativeTitle := ""
+	japaneseTitle := ""
+	if anime.Title != nil {
+		title = anime.Title.Romaji
+		alternativeTitle = anime.Title.English
+		japaneseTitle = anime.Title.Japanese
+	}
+
+	tmdbID := 0
+	malID := anime.MALID
+	if anime.Mapping != nil {
+		tmdbID = anime.Mapping.TMDB
+	}
+
+	animeScore := 0.0
+	if anime.Scores != nil {
+		animeScore = anime.Scores.Score
+	}
+
+	logger.Debugf("TMDB", "Fetching movie episode data for: %s", title)
 
 	var movieID int
 	var err error
 
-	// If TMDB ID is provided, use it directly
 	if tmdbID > 0 {
 		movieID = tmdbID
-		logger.Log(fmt.Sprintf("Using provided TMDB movie ID: %d", movieID), logger.LogOptions{
-			Level:  logger.Debug,
-			Prefix: "TMDB",
-		})
+		logger.Debugf("TMDB", "Using provided TMDB movie ID: %d", movieID)
 	} else {
-		// Search for the movie
 		movies, err := searchMoviesByTitle(title, alternativeTitle)
 		if err != nil || len(movies) == 0 {
-			logger.Log(fmt.Sprintf("Failed to find movie on TMDB: %v", err), logger.LogOptions{
-				Level:  logger.Warn,
-				Prefix: "TMDB",
-			})
-			return nil, fmt.Errorf("movie not found on TMDB")
+			logger.Warnf("TMDB", "Failed to find movie on TMDB: %v", err)
+			return errors.New("movie not found on TMDB")
 		}
 
-		// Use the first result
 		movieID = movies[0].ID
-		logger.Log(fmt.Sprintf("Found TMDB movie ID: %d for title: %s", movieID, title), logger.LogOptions{
-			Level:  logger.Debug,
-			Prefix: "TMDB",
-		})
+		logger.Debugf("TMDB", "Found TMDB movie ID: %d for title: %s", movieID, title)
 	}
 
-	// Get movie details
 	movieDetails, err := getMovieDetails(movieID)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Failed to fetch movie details: %v", err), logger.LogOptions{
-			Level:  logger.Warn,
-			Prefix: "TMDB",
-		})
-		return nil, err
+		logger.Warnf("TMDB", "Failed to fetch movie details: %v", err)
+		return err
 	}
-
-	// Convert movie to a single episode format
-	const tmdbImageBaseURL = "https://image.tmdb.org/t/p/"
-	const backdropSize = "w780"
 
 	backdropURL := ""
 	if movieDetails.BackdropPath != "" {
@@ -670,20 +619,18 @@ func GetMovieAsEpisode(title string, alternativeTitle string, tmdbID int, malID 
 
 	description := movieDetails.Overview
 	if description == "" {
-		description = "No description available"
+		description = noDescription
 	}
 
-	// Create titles structure with English title from TMDB and Japanese/Romaji from MAL
-	titles := types.EpisodeTitles{
-		English:  movieDetails.Title,
-		Japanese: japaneseTitle,
-		Romaji:   title,
+	if episode.Title == nil {
+		episode.Title = &entities.Title{}
 	}
+	episode.Title.English = movieDetails.Title
+	episode.Title.Japanese = japaneseTitle
+	episode.Title.Romaji = title
 
-	// Calculate score out of 5 (half of MAL score out of 10), rounded to 2 decimal points
 	movieScore := float64(int((animeScore/2.0)*100)) / 100
 
-	// Generate MAL URLs
 	malURL := ""
 	forumURL := ""
 	if malID > 0 {
@@ -691,39 +638,25 @@ func GetMovieAsEpisode(title string, alternativeTitle string, tmdbID int, malID 
 		forumURL = fmt.Sprintf("https://myanimelist.net/anime/%d/forum", malID)
 	}
 
-	episode := types.AnimeSingleEpisode{
-		ID:           generateEpisodeID(titles),
-		Titles:       titles,
-		Description:  description,
-		ThumbnailURL: backdropURL,
-		Aired:        movieDetails.ReleaseDate,
-		Score:        movieScore,
-		Filler:       false,
-		Recap:        false,
-		ForumURL:     forumURL,
-		URL:          malURL,
-	}
+	episode.EpisodeID = generateEpisodeID(malID, 1, movieDetails.Title)
+	episode.Description = description
+	episode.ThumbnailURL = backdropURL
+	episode.Aired = movieDetails.ReleaseDate
+	episode.Score = movieScore
+	episode.Filler = false
+	episode.Recap = false
+	episode.ForumURL = forumURL
+	episode.URL = malURL
+	episode.EpisodeNumber = 1
+	episode.EpisodeLength = float64(movieDetails.Runtime)
 
-	logger.Log(fmt.Sprintf("Successfully created episode from movie: %s", title), logger.LogOptions{
-		Level:  logger.Success,
-		Prefix: "TMDB",
-	})
+	logger.Successf("TMDB", "Successfully created episode from movie: %s", title)
 
-	return []types.AnimeSingleEpisode{episode}, nil
+	return nil
 }
 
-// generateEpisodeID creates a unique episode ID from titles
-func generateEpisodeID(titles types.EpisodeTitles) string {
-	var title string
-	if titles.English != "" {
-		title = titles.English
-	} else if titles.Romaji != "" {
-		title = titles.Romaji
-	} else {
-		title = titles.Japanese
-	}
-
-	// MD5 hash for ID generation to match Jikan episode IDs
-	hash := md5.Sum([]byte(title))
+func generateEpisodeID(malID int, episodeNumber int, title string) string {
+	uniqueString := fmt.Sprintf("%d-%d-%s", malID, episodeNumber, title)
+	hash := md5.Sum([]byte(uniqueString))
 	return fmt.Sprintf("%x", hash)
 }

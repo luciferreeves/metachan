@@ -20,6 +20,9 @@ const (
 	rateLimitPerSec   = 10
 	rateLimitPer10Sec = 100
 	contextTimeout    = 10 * time.Second
+	timeout           = 10 * time.Second
+	maxRetries        = 3
+	backoffDuration   = 1 * time.Second
 )
 
 var (
@@ -29,10 +32,10 @@ var (
 	)
 	clientInstance = &client{
 		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: timeout,
 		},
-		maxRetries: 3,
-		backoff:    1 * time.Second,
+		maxRetries: maxRetries,
+		backoff:    backoffDuration,
 	}
 )
 
