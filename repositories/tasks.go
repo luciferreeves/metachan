@@ -2,7 +2,6 @@ package repositories
 
 import (
 	"errors"
-	"metachan/database"
 	"metachan/entities"
 	"metachan/utils/logger"
 )
@@ -10,7 +9,7 @@ import (
 func GetTaskStatus(taskName string) (entities.TaskStatus, error) {
 	var taskStatus entities.TaskStatus
 
-	result := database.DB.Where("task_name = ?", taskName).First(&taskStatus)
+	result := DB.Where("task_name = ?", taskName).First(&taskStatus)
 
 	if result.Error != nil {
 		return entities.TaskStatus{}, errors.New("task status not found")
@@ -20,7 +19,7 @@ func GetTaskStatus(taskName string) (entities.TaskStatus, error) {
 }
 
 func SetTaskStatus(task *entities.TaskStatus) error {
-	result := database.DB.Save(task)
+	result := DB.Save(task)
 
 	if result.Error != nil {
 		logger.Errorf("Task", "Failed to set task status for %s: %v", task.TaskName, result.Error)
@@ -34,7 +33,7 @@ func SetTaskStatus(task *entities.TaskStatus) error {
 func GetLatestTaskLog(taskName string) (*entities.TaskLog, error) {
 	var taskLog entities.TaskLog
 
-	result := database.DB.Where("task_name = ?", taskName).Order("executed_at desc").First(&taskLog)
+	result := DB.Where("task_name = ?", taskName).Order("executed_at desc").First(&taskLog)
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -43,7 +42,7 @@ func GetLatestTaskLog(taskName string) (*entities.TaskLog, error) {
 }
 
 func CreateTaskLog(taskLog *entities.TaskLog) error {
-	result := database.DB.Create(taskLog)
+	result := DB.Create(taskLog)
 	if result.Error != nil {
 		logger.Errorf("Task", "Failed to create task log: %v", result.Error)
 		return errors.New("failed to create task log")

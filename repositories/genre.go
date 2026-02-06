@@ -2,7 +2,6 @@ package repositories
 
 import (
 	"errors"
-	"metachan/database"
 	"metachan/entities"
 	"metachan/utils/logger"
 
@@ -10,7 +9,7 @@ import (
 )
 
 func CreateOrUpdateGenre(genre *entities.Genre) error {
-	result := database.DB.Clauses(clause.OnConflict{
+	result := DB.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "genre_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{"name", "url", "count"}),
 	}).Create(genre)

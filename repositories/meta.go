@@ -2,7 +2,6 @@ package repositories
 
 import (
 	"errors"
-	"metachan/database"
 	"metachan/entities"
 	"metachan/utils/logger"
 
@@ -10,7 +9,7 @@ import (
 )
 
 func CreateOrUpdateSimpleImage(image *entities.SimpleImage) (uint, error) {
-	result := database.DB.Clauses(clause.OnConflict{
+	result := DB.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "image_url"}},
 		DoUpdates: clause.AssignmentColumns([]string{"image_url"}),
 	}).Create(image)
@@ -23,8 +22,44 @@ func CreateOrUpdateSimpleImage(image *entities.SimpleImage) (uint, error) {
 	return image.ID, nil
 }
 
+func BatchCreateSimpleImages(images []entities.SimpleImage) error {
+	if len(images) == 0 {
+		return nil
+	}
+
+	result := DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "image_url"}},
+		DoNothing: true,
+	}).CreateInBatches(&images, 100)
+
+	if result.Error != nil {
+		logger.Errorf("Meta", "Failed to batch create images: %v", result.Error)
+		return errors.New("failed to batch create images")
+	}
+
+	return nil
+}
+
+func BatchCreateSimpleTitles(titles []entities.SimpleTitle) error {
+	if len(titles) == 0 {
+		return nil
+	}
+
+	result := DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "type"}, {Name: "title"}},
+		DoNothing: true,
+	}).CreateInBatches(&titles, 100)
+
+	if result.Error != nil {
+		logger.Errorf("Meta", "Failed to batch create titles: %v", result.Error)
+		return errors.New("failed to batch create titles")
+	}
+
+	return nil
+}
+
 func CreateOrUpdateSimpleTitle(title *entities.SimpleTitle) (uint, error) {
-	result := database.DB.Clauses(clause.OnConflict{
+	result := DB.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "type"}, {Name: "title"}},
 		DoUpdates: clause.AssignmentColumns([]string{"type", "title"}),
 	}).Create(title)
@@ -38,7 +73,7 @@ func CreateOrUpdateSimpleTitle(title *entities.SimpleTitle) (uint, error) {
 }
 
 func CreateOrUpdateExternalURL(url *entities.ExternalURL) (uint, error) {
-	result := database.DB.Clauses(clause.OnConflict{
+	result := DB.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "name"}, {Name: "url"}},
 		DoUpdates: clause.AssignmentColumns([]string{"name", "url"}),
 	}).Create(url)

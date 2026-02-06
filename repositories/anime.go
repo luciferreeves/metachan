@@ -3,7 +3,6 @@ package repositories
 import (
 	"errors"
 	"fmt"
-	"metachan/database"
 	"metachan/entities"
 	"metachan/enums"
 	"metachan/utils/logger"
@@ -21,7 +20,7 @@ func GetAnime[T idType](maptype enums.MappingType, id T) (entities.Anime, error)
 		return entities.Anime{}, errors.New("anime not found")
 	}
 
-	result := database.DB.
+	result := DB.
 		Preload("Mapping").
 		Preload("Title").
 		Preload("Images").
@@ -75,12 +74,12 @@ func CreateOrUpdateAnime(anime *entities.Anime) error {
 	}
 
 	var existingAnime entities.Anime
-	result := database.DB.Where("mal_id = ?", anime.MALID).First(&existingAnime)
+	result := DB.Where("mal_id = ?", anime.MALID).First(&existingAnime)
 	if result.Error == nil {
 		anime.ID = existingAnime.ID
 	}
 
-	result = database.DB.Session(&gorm.Session{FullSaveAssociations: true}).Clauses(clause.OnConflict{
+	result = DB.Session(&gorm.Session{FullSaveAssociations: true}).Clauses(clause.OnConflict{
 		UpdateAll: true,
 	}).Save(anime)
 
@@ -97,11 +96,11 @@ func SaveEpisodeSkipTimes(episodeID string, skipTimes []entities.EpisodeSkipTime
 		return nil
 	}
 
-	database.DB.Where("episode_id = ?", episodeID).Delete(&entities.EpisodeSkipTime{})
+	DB.Where("episode_id = ?", episodeID).Delete(&entities.EpisodeSkipTime{})
 
 	for i := range skipTimes {
 		skipTimes[i].EpisodeID = episodeID
-		if err := database.DB.Create(&skipTimes[i]).Error; err != nil {
+		if err := DB.Create(&skipTimes[i]).Error; err != nil {
 			return fmt.Errorf("failed to save skip time: %w", err)
 		}
 	}
@@ -112,7 +111,7 @@ func SaveEpisodeSkipTimes(episodeID string, skipTimes []entities.EpisodeSkipTime
 func GetAiringAnime() ([]entities.Anime, error) {
 	var anime []entities.Anime
 
-	result := database.DB.
+	result := DB.
 		Where("airing = ?", true).
 		Preload("NextAiring").
 		Preload("Schedule").

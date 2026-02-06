@@ -108,7 +108,15 @@ func (c *client) makeRequest(ctx context.Context, url string) ([]byte, error) {
 			}
 
 			return bytes, nil
+		case http.StatusNotFound:
+			logger.Warnf("JikanClient", "Resource not found: %s", url)
+			return nil, errors.New("resource not found")
 		default:
+			if response.StatusCode >= 400 && response.StatusCode < 500 {
+				logger.Warnf("JikanClient", "Client error %d for %s", response.StatusCode, url)
+				return nil, fmt.Errorf("client error: status %d", response.StatusCode)
+			}
+
 			retries++
 			backoffDuration := c.getBackOffDuration(retries)
 
