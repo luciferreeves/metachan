@@ -10,20 +10,16 @@ import (
 )
 
 func HealthStatus(c *fiber.Ctx) error {
-	// Check if the database is connected
 	databaseStatus := database.GetConnectionStatus()
 
-	// Get the memory stats
 	memoryStats := stats.GetMemoryStats()
 
-	// Get the task statuses
 	taskStatuses := tasks.GlobalTaskManager.GetAllTaskStatuses()
 
 	statusString := map[bool]string{
 		true:  "healthy",
 		false: "unhealthy",
 	}[databaseStatus]
-	// Create the health status response
 	healthStatus := types.HealthStatus{
 		Status:    statusString,
 		Timestamp: stats.GetCurrentTimestamp(),

@@ -14,8 +14,6 @@ import (
 )
 
 func main() {
-	logger.Init()
-
 	tasks.GlobalTaskManager.StartAllTasks()
 
 	app := fiber.New(fiber.Config{

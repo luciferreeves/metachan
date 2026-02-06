@@ -131,7 +131,7 @@ func log(levelLabel LogLevel, zapLevel zapcore.Level, prefix string, msg any) {
 
 	message := fmt.Sprint(msg)
 	colored := colorMessage(levelLabel, message)
+	fullMessage := formatPrefix(prefix) + colored
 
-	loggerInstance.Check(zapLevel, colored).
-		Write(zap.String("prefix", formatPrefix(prefix)))
+	loggerInstance.Log(zapLevel, fullMessage)
 }

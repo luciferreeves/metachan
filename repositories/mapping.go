@@ -41,3 +41,15 @@ func CreateOrUpdateMapping(mapping *entities.Mapping) error {
 
 	return nil
 }
+
+func GetAllMappings() ([]entities.Mapping, error) {
+	var mappings []entities.Mapping
+
+	result := database.DB.Find(&mappings)
+	if result.Error != nil {
+		logger.Errorf("Mapping", "Failed to fetch all mappings: %v", result.Error)
+		return nil, errors.New("failed to fetch mappings")
+	}
+
+	return mappings, nil
+}

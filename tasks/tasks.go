@@ -1,9 +1,7 @@
 package tasks
 
 import (
-	"fmt"
 	"metachan/config"
-	"metachan/database"
 	"metachan/types"
 	"metachan/utils/logger"
 	"sync"
@@ -14,11 +12,10 @@ var GlobalTaskManager *TaskManager
 
 func init() {
 	GlobalTaskManager = &TaskManager{
-		Tasks:    make(map[string]types.Task),
-		Tickers:  make(map[string]*time.Ticker),
-		Done:     make(map[string]chan bool),
-		Mutex:    sync.Mutex{},
-		Database: database.DB,
+		Tasks:   make(map[string]types.Task),
+		Tickers: make(map[string]*time.Ticker),
+		Done:    make(map[string]chan bool),
+		Mutex:   sync.Mutex{},
 	}
 
 	// Register ProducerSync task (every 7 days) - runs first to populate unified producer table
@@ -29,10 +26,7 @@ func init() {
 	})
 
 	if err != nil {
-		logger.Log(fmt.Sprintf("Failed to register ProducerSync task: %v", err), logger.LogOptions{
-			Level:  logger.Error,
-			Prefix: "TaskManager",
-		})
+		logger.Errorf("TaskManager", "Failed to register ProducerSync task: %v", err)
 	}
 
 	// Register GenreSync task (every 7 days)
@@ -43,10 +37,7 @@ func init() {
 	})
 
 	if err != nil {
-		logger.Log(fmt.Sprintf("Failed to register GenreSync task: %v", err), logger.LogOptions{
-			Level:  logger.Error,
-			Prefix: "TaskManager",
-		})
+		logger.Errorf("TaskManager", "Failed to register GenreSync task: %v", err)
 	}
 
 	// Register AniFetch task (weekly) - fetches anime mappings from Fribb list
@@ -59,14 +50,11 @@ func init() {
 	})
 
 	if err != nil {
-		logger.Log(fmt.Sprintf("Failed to register AnimeFetch task: %v", err), logger.LogOptions{
-			Level:  logger.Error,
-			Prefix: "TaskManager",
-		})
+		logger.Errorf("TaskManager", "Failed to register AnimeFetch task: %v", err)
 	}
 
 	// Register AnimeSync task (runs after AnimeFetch completes) - only if enabled in config
-	if config.Config.AniSync {
+	if config.Sync.AniSync {
 		err = GlobalTaskManager.RegisterTask(types.Task{
 			Name:         "AnimeSync",
 			Interval:     0, // Manual-only - waits for AnimeFetch dependency
@@ -75,10 +63,7 @@ func init() {
 		})
 
 		if err != nil {
-			logger.Log(fmt.Sprintf("Failed to register AnimeSync task: %v", err), logger.LogOptions{
-				Level:  logger.Error,
-				Prefix: "TaskManager",
-			})
+			logger.Errorf("TaskManager", "Failed to register AnimeSync task: %v", err)
 		}
 	}
 
@@ -90,9 +75,6 @@ func init() {
 	})
 
 	if err != nil {
-		logger.Log(fmt.Sprintf("Failed to register AnimeUpdate task: %v", err), logger.LogOptions{
-			Level:  logger.Error,
-			Prefix: "TaskManager",
-		})
+		logger.Errorf("TaskManager", "Failed to register AnimeUpdate task: %v", err)
 	}
 }

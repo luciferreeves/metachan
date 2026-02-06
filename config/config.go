@@ -15,6 +15,8 @@ var (
 )
 
 func init() {
+	logger.Init()
+
 	if err := godotenv.Load(); err != nil {
 		logger.Infof("Config", "No .env file found. Environment variables will be used directly.")
 	}

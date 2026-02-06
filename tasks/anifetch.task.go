@@ -4,53 +4,43 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"metachan/database"
 	"metachan/entities"
+	"metachan/enums"
+	"metachan/repositories"
 	"metachan/types"
 	"metachan/utils/logger"
 	"metachan/utils/mappers"
 	"net/http"
-
-	"gorm.io/gorm"
 )
 
-const fribbURL = "https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json"
+const (
+	fribbURL  = "https://raw.githubusercontent.com/Fribb/anime-lists/master/anime-list-full.json"
+	batchSize = 1000
+)
 
 func AniFetch() error {
-	logger.Log("Starting Anime Fetch", logger.LogOptions{
-		Level:  logger.Info,
-		Prefix: "AniFetch",
-	})
+	logger.Infof("AniFetch", "Starting Anime Fetch")
 
 	response, err := http.Get(fribbURL)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Anime Fetch failed: %v", err), logger.LogOptions{
-			Level:  logger.Error,
-			Prefix: "AniFetch",
-		})
+		logger.Errorf("AniFetch", "Anime Fetch failed: %v", err)
 		return err
 	}
+
 	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Failed to read response body: %v", err), logger.LogOptions{
-			Level:  logger.Error,
-			Prefix: "AniFetch",
-		})
+		logger.Errorf("AniFetch", "Failed to read response body: %v", err)
 		return err
 	}
 
-	var mappings []types.AniSyncMapping
+	var mappings []types.MappingResponse
 	if err := json.Unmarshal(body, &mappings); err != nil {
-		logger.Log(fmt.Sprintf("Failed to unmarshal JSON: %v", err), logger.LogOptions{
-			Level:  logger.Error,
-			Prefix: "AniFetch",
-		})
+		logger.Errorf("AniFetch", "Failed to unmarshal JSON: %v", err)
 		return err
 	}
 
-	batchSize := 1000
 	total := len(mappings)
 
 	for i := 0; i < total; i += batchSize {
@@ -61,21 +51,15 @@ func AniFetch() error {
 
 		batch := mappings[i:end]
 		processBatch(batch)
-		logger.Log(fmt.Sprintf("Processed %d/%d mappings", end, total), logger.LogOptions{
-			Level:  logger.Info,
-			Prefix: "AniFetch",
-		})
+		logger.Infof("AniFetch", "Processed %d/%d mappings", end, total)
 	}
 
-	logger.Log("Anime Fetch completed", logger.LogOptions{
-		Level:  logger.Success,
-		Prefix: "AniFetch",
-	})
+	logger.Successf("AniFetch", "Anime Fetch completed")
 
 	return nil
 }
 
-func processBatch(mappings []types.AniSyncMapping) {
+func processBatch(mappings []types.MappingResponse) {
 	for _, mapping := range mappings {
 		var composite *string
 		if mapping.MAL != 0 && mapping.Anilist != 0 {
@@ -83,61 +67,26 @@ func processBatch(mappings []types.AniSyncMapping) {
 			composite = &comp
 		}
 
-		var entity entities.AnimeMapping
-		if err := database.DB.Where("mal_anilist_composite = ?", composite).First(&entity).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
-				newEntity := entities.AnimeMapping{
-					AniDB:               mapping.AniDB,
-					Anilist:             mapping.Anilist,
-					AnimeCountdown:      mapping.AnimeCountdown,
-					AnimePlanet:         mappers.ForceString(mapping.AnimePlanet),
-					AniSearch:           mapping.AniSearch,
-					IMDB:                mapping.IMDB,
-					Kitsu:               mapping.Kitsu,
-					LiveChart:           mapping.LiveChart,
-					MAL:                 mapping.MAL,
-					NotifyMoe:           mapping.NotifyMoe,
-					Simkl:               mapping.Simkl,
-					TMDB:                mappers.ForceInt(mapping.TMDB),
-					TVDB:                mapping.TVDB,
-					Type:                entities.MappingType(mapping.Type),
-					MALAnilistComposite: composite,
-				}
-				if err := database.DB.Create(&newEntity).Error; err != nil {
-					logger.Log(fmt.Sprintf("Unable to process mapping %v: %v", mapping, err), logger.LogOptions{
-						Level:  logger.Warn,
-						Prefix: "AniFetch",
-					})
-				}
-			} else {
-				logger.Log(fmt.Sprintf("Error fetching entity: %v", err), logger.LogOptions{
-					Level:  logger.Error,
-					Prefix: "AniFetch",
-				})
-			}
-		} else {
-			// Update existing entity
-			entity.AniDB = mapping.AniDB
-			entity.Anilist = mapping.Anilist
-			entity.AnimeCountdown = mapping.AnimeCountdown
-			entity.AnimePlanet = mappers.ForceString(mapping.AnimePlanet)
-			entity.AniSearch = mapping.AniSearch
-			entity.IMDB = mapping.IMDB
-			entity.Kitsu = mapping.Kitsu
-			entity.LiveChart = mapping.LiveChart
-			entity.MAL = mapping.MAL
-			entity.NotifyMoe = mapping.NotifyMoe
-			entity.Simkl = mapping.Simkl
-			entity.TMDB = mappers.ForceInt(mapping.TMDB)
-			entity.TVDB = mapping.TVDB
-			entity.Type = entities.MappingType(mapping.Type)
-			entity.MALAnilistComposite = composite
-			if err := database.DB.Save(&entity).Error; err != nil {
-				logger.Log(fmt.Sprintf("Unable to update mapping %v: %v", mapping, err), logger.LogOptions{
-					Level:  logger.Warn,
-					Prefix: "AniFetch",
-				})
-			}
+		entity := entities.Mapping{
+			AniDB:               mapping.AniDB,
+			Anilist:             mapping.Anilist,
+			AnimeCountdown:      mapping.AnimeCountdown,
+			AnimePlanet:         mappers.ForceString(mapping.AnimePlanet),
+			AniSearch:           mapping.AniSearch,
+			IMDB:                mapping.IMDB,
+			Kitsu:               mapping.Kitsu,
+			LiveChart:           mapping.LiveChart,
+			MAL:                 mapping.MAL,
+			NotifyMoe:           mapping.NotifyMoe,
+			Simkl:               mapping.Simkl,
+			TMDB:                mappers.ForceInt(mapping.TMDB),
+			TVDB:                mapping.TVDB,
+			Type:                enums.MappingAnimeType(mapping.Type),
+			MALAnilistComposite: composite,
+		}
+
+		if err := repositories.CreateOrUpdateMapping(&entity); err != nil {
+			logger.Warnf("AniFetch", "Unable to process mapping %v: %v", mapping, err)
 		}
 	}
 }

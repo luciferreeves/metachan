@@ -88,7 +88,6 @@ func (c *client) makeRequest(ctx context.Context, url string) ([]byte, error) {
 
 		switch response.StatusCode {
 		case http.StatusNotFound:
-			// Not found is not an error, return nil
 			return nil, nil
 		case http.StatusTooManyRequests:
 			retryAfter := c.getRetryAfterDuration(response)
@@ -131,7 +130,6 @@ func GetAnimeByMALID(malID int) (*types.MalsyncAnimeResponse, error) {
 		return nil, errors.New("failed to fetch anime data from Malsync API")
 	}
 
-	// Handle 404 case where makeRequest returns nil, nil
 	if bytes == nil {
 		return nil, nil
 	}

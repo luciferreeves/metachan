@@ -3,157 +3,106 @@ package tasks
 import (
 	"fmt"
 	"metachan/config"
-	"metachan/database"
 	"metachan/entities"
-	"metachan/services/anime"
-	"metachan/types"
+	"metachan/enums"
+	"metachan/repositories"
+	"metachan/services"
 	"metachan/utils/logger"
 	"sync"
 	"time"
 )
 
-// Constants for anime update task
 const (
-	// UpdaterSource identifies the source of the update request
 	UpdaterSource = "updater"
 
-	// MaxConcurrentUpdates limits the number of concurrent anime updates
 	MaxConcurrentUpdates = 5
 
-	// MaxConcurrentSQLiteUpdates limits concurrent updates for SQLite to prevent locks
 	MaxConcurrentSQLiteUpdates = 1
 
-	// UpdateInterval defines how often an anime should be updated even without specific triggers
 	UpdateInterval = 6 * time.Hour
 )
 
-// animeUpdateJob represents a single anime update job
 type animeUpdateJob struct {
 	series entities.Anime
 	reason string
 }
 
-// AnimeUpdate checks for airing anime that need to be updated
 func AnimeUpdate() error {
-	logger.Log("Starting Anime Update Task", logger.LogOptions{
-		Level:  logger.Info,
-		Prefix: "AnimeUpdate",
-	})
+	logger.Infof("AnimeUpdate", "Starting Anime Update Task")
 
-	// Find all currently airing anime
-	var airingSeries []entities.Anime
-	result := database.DB.
-		Where("airing = ?", true).
-		Preload("NextAiringEpisode").
-		Preload("AiringSchedule").
-		Find(&airingSeries)
-
-	if result.Error != nil {
-		logger.Log(fmt.Sprintf("Failed to fetch airing anime: %v", result.Error), logger.LogOptions{
-			Level:  logger.Error,
-			Prefix: "AnimeUpdate",
-		})
-		return result.Error
+	airingSeries, err := repositories.GetAiringAnime()
+	if err != nil {
+		logger.Errorf("AnimeUpdate", "Failed to fetch airing anime: %v", err)
+		return err
 	}
 
-	logger.Log(fmt.Sprintf("Found %d airing anime series", len(airingSeries)), logger.LogOptions{
-		Level:  logger.Info,
-		Prefix: "AnimeUpdate",
-	})
+	logger.Infof("AnimeUpdate", "Found %d airing anime series", len(airingSeries))
 
-	// Get current timestamp
 	currentTime := time.Now().Unix()
 
-	// Log the current time for debugging
-	logger.Log(fmt.Sprintf("Current timestamp: %d (%s)",
-		currentTime, time.Unix(currentTime, 0).Format(time.RFC3339)), logger.LogOptions{
-		Level:  logger.Debug,
-		Prefix: "AnimeUpdate",
-	})
+	logger.Debugf("AnimeUpdate", "Current timestamp: %d (%s)", currentTime, time.Unix(currentTime, 0).Format(time.RFC3339))
 
-	// Create a channel for jobs
 	jobs := make(chan animeUpdateJob, len(airingSeries))
 
-	// Determine max concurrency based on database type
 	maxWorkers := MaxConcurrentUpdates
-	if config.Config.DatabaseDriver == types.SQLite {
+	if config.Database.Driver == "sqlite" {
 		maxWorkers = MaxConcurrentSQLiteUpdates
-		logger.Log(fmt.Sprintf("Using reduced concurrency (%d workers) for SQLite database",
-			maxWorkers), logger.LogOptions{
-			Level:  logger.Debug,
-			Prefix: "AnimeUpdate",
-		})
+		logger.Debugf("AnimeUpdate", "Using reduced concurrency (%d workers) for SQLite database", maxWorkers)
 	}
 
-	// Create a wait group to wait for all workers to finish
 	var wg sync.WaitGroup
 
-	// Create workers
 	for i := 0; i < maxWorkers; i++ {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			animeService := anime.NewService()
 
-			logger.Log(fmt.Sprintf("Started worker #%d", workerID), logger.LogOptions{
-				Level:  logger.Debug,
-				Prefix: "AnimeUpdate",
-			})
+			logger.Debugf("AnimeUpdate", "Started worker #%d", workerID)
 
-			// Process jobs from the channel
 			for job := range jobs {
-				updateAnime(animeService, job.series, job.reason)
+				updateAnime(job.series, job.reason)
 			}
 		}(i)
 	}
 
-	// Queue updates for anime that need it
 	jobsQueued := 0
 	for _, series := range airingSeries {
-		// Check if we need to update this anime
 		needsUpdate := false
 		reason := ""
 
-		// Log details about this particular anime for debugging
-		logger.Log(fmt.Sprintf("Checking anime: %s (ID: %d)",
-			series.TitleRomaji, series.MALID), logger.LogOptions{
-			Level:  logger.Debug,
-			Prefix: "AnimeUpdate",
-		})
+		title := ""
+		if series.Title != nil {
+			if series.Title.Romaji != "" {
+				title = series.Title.Romaji
+			} else if series.Title.English != "" {
+				title = series.Title.English
+			}
+		}
 
-		// If there's no next airing episode data, we should update
-		if series.NextAiringEpisode == nil || series.NextAiringEpisode.AiringAt == 0 {
+		logger.Debugf("AnimeUpdate", "Checking anime: %s (ID: %d)", title, series.MALID)
+
+		if series.NextAiring == nil || series.NextAiring.AiringAt == 0 {
 			needsUpdate = true
 			reason = "missing next episode data"
-		} else if int64(series.NextAiringEpisode.AiringAt) <= currentTime {
-			// If the next episode should have aired already, update to get fresh data
+		} else if int64(series.NextAiring.AiringAt) <= currentTime {
 			needsUpdate = true
 			reason = "next episode already aired"
 		}
 
-		// Check if the anime was last updated more than the update interval ago
 		if !needsUpdate && !series.LastUpdated.IsZero() && time.Since(series.LastUpdated) > UpdateInterval {
 			needsUpdate = true
 			reason = fmt.Sprintf("regular update (last updated %s ago)",
 				time.Since(series.LastUpdated).Round(time.Second))
 		}
 
-		// Log update decision
 		if !needsUpdate {
-			logger.Log(fmt.Sprintf("Skipping update for %s (ID: %d) - no update needed. Next airing at: %d",
-				series.TitleRomaji, series.MALID, series.NextAiringEpisode.AiringAt), logger.LogOptions{
-				Level:  logger.Debug,
-				Prefix: "AnimeUpdate",
-			})
+			logger.Debugf("AnimeUpdate", "Skipping update for %s (ID: %d) - no update needed. Next airing at: %d",
+				title, series.MALID, series.NextAiring.AiringAt)
 			continue
 		}
 
-		// Add the job to the queue
-		logger.Log(fmt.Sprintf("Queueing update for %s (ID: %d) - Reason: %s",
-			series.TitleRomaji, series.MALID, reason), logger.LogOptions{
-			Level:  logger.Debug,
-			Prefix: "AnimeUpdate",
-		})
+		logger.Debugf("AnimeUpdate", "Queueing update for %s (ID: %d) - Reason: %s",
+			title, series.MALID, reason)
 
 		jobs <- animeUpdateJob{
 			series: series,
@@ -162,132 +111,96 @@ func AnimeUpdate() error {
 		jobsQueued++
 	}
 
-	// Close the job channel to signal workers that no more jobs are coming
 	close(jobs)
 
-	// Wait for all workers to finish
 	wg.Wait()
 
-	logger.Log(fmt.Sprintf("Anime Update Task Completed - Processed %d anime", jobsQueued), logger.LogOptions{
-		Level:  logger.Success,
-		Prefix: "AnimeUpdate",
-	})
+	logger.Successf("AnimeUpdate", "Anime Update Task Completed - Processed %d anime", jobsQueued)
 
 	return nil
 }
 
-// updateAnime updates a single anime series
-func updateAnime(animeService *anime.Service, series entities.Anime, reason string) {
-	title := series.TitleRomaji
-	if series.TitleEnglish != "" {
-		title = series.TitleEnglish
+func updateAnime(series entities.Anime, reason string) {
+	title := ""
+	if series.Title != nil {
+		if series.Title.English != "" {
+			title = series.Title.English
+		} else if series.Title.Romaji != "" {
+			title = series.Title.Romaji
+		}
 	}
 
-	logger.Log(fmt.Sprintf("Updating anime: %s (MAL ID: %d) - %s", title, series.MALID, reason), logger.LogOptions{
-		Level:  logger.Info,
-		Prefix: "AnimeUpdate",
-	})
+	logger.Infof("AnimeUpdate", "Updating anime: %s (MAL ID: %d) - %s", title, series.MALID, reason)
 
-	// Get anime mapping for the service call
-	mapping, err := database.GetAnimeMappingViaMALID(series.MALID)
+	mapping, err := repositories.GetAnimeMapping(enums.MAL, series.MALID)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Error getting anime mapping for %s (MAL ID: %d): %v", title, series.MALID, err), logger.LogOptions{
-			Level:  logger.Error,
-			Prefix: "AnimeUpdate",
-		})
+		logger.Errorf("AnimeUpdate", "Error getting anime mapping for %s (MAL ID: %d): %v", title, series.MALID, err)
 		return
 	}
 
-	// Get updated anime data from API
-	updatedAnime, err := animeService.GetAnimeDetailsWithSource(mapping, "mal")
+	updatedAnime, err := services.GetAnime(&mapping)
 	if err != nil {
-		logger.Log(fmt.Sprintf("Error getting updated anime data for %s (MAL ID: %d): %v", title, series.MALID, err), logger.LogOptions{
-			Level:  logger.Error,
-			Prefix: "AnimeUpdate",
-		})
+		logger.Errorf("AnimeUpdate", "Error getting updated anime data for %s (MAL ID: %d): %v", title, series.MALID, err)
 		return
 	}
 
-	logger.Log(fmt.Sprintf("Successfully updated anime: %s (MAL ID: %d)", title, series.MALID), logger.LogOptions{
-		Level:  logger.Info,
-		Prefix: "AnimeUpdate",
-	})
+	logger.Successf("AnimeUpdate", "Successfully updated anime: %s (MAL ID: %d)", title, series.MALID)
 
-	// Check if the updated anime data has significant changes that warrant saving
 	if shouldSaveUpdate(&series, updatedAnime) {
-		// Check if anime is still airing
 		if updatedAnime.Status != "RELEASING" && updatedAnime.Status != "AIRING" {
-			// Update the anime data to reflect that it's no longer airing
 			updatedAnime.Airing = false
 		}
 
-		if err := database.SaveAnimeToDatabase(updatedAnime); err != nil {
-			logger.Log(fmt.Sprintf("Error saving updated anime data for %s (MAL ID: %d): %v", title, series.MALID, err), logger.LogOptions{
-				Level:  logger.Error,
-				Prefix: "AnimeUpdate",
-			})
+		if err := repositories.CreateOrUpdateAnime(updatedAnime); err != nil {
+			logger.Errorf("AnimeUpdate", "Error saving updated anime data for %s (MAL ID: %d): %v", title, series.MALID, err)
 		} else {
-			logger.Log(fmt.Sprintf("Successfully saved updated data for %s (MAL ID: %d)", title, series.MALID), logger.LogOptions{
-				Level:  logger.Info,
-				Prefix: "AnimeUpdate",
-			})
+			logger.Infof("AnimeUpdate", "Successfully saved updated data for %s (MAL ID: %d)", title, series.MALID)
 
 			if !updatedAnime.Airing {
-				logger.Log(fmt.Sprintf("Anime %s (MAL ID: %d) is no longer airing. Status: %s", title, series.MALID, updatedAnime.Status), logger.LogOptions{
-					Level:  logger.Info,
-					Prefix: "AnimeUpdate",
-				})
+				logger.Infof("AnimeUpdate", "Anime %s (MAL ID: %d) is no longer airing. Status: %s", title, series.MALID, updatedAnime.Status)
 			}
 		}
 	} else {
-		logger.Log(fmt.Sprintf("No significant changes detected for %s (MAL ID: %d), skipping database update", title, series.MALID), logger.LogOptions{
-			Level:  logger.Debug,
-			Prefix: "AnimeUpdate",
-		})
+		logger.Debugf("AnimeUpdate", "No significant changes detected for %s (MAL ID: %d), skipping database update", title, series.MALID)
 	}
 }
 
-// shouldSaveUpdate determines if the updated anime data has significant changes
-// that warrant saving it to the database
-func shouldSaveUpdate(oldAnime *entities.Anime, newAnime *types.Anime) bool {
+func shouldSaveUpdate(oldAnime *entities.Anime, newAnime *entities.Anime) bool {
 	if oldAnime == nil {
 		return true
 	}
 
-	// Convert old anime to types.Anime for easier comparison
-	oldAnimeConverted := database.ConvertToTypesAnime(oldAnime)
+	oldHasNext := oldAnime.NextAiring != nil && oldAnime.NextAiring.AiringAt > 0
+	newHasNext := newAnime.NextAiring != nil && newAnime.NextAiring.AiringAt > 0
 
-	// Check for changes in next airing episode
-	oldNextEp := oldAnimeConverted.NextAiringEpisode
-	newNextEp := newAnime.NextAiringEpisode
-
-	// If next episode timestamp or number changed
-	if oldNextEp.AiringAt != newNextEp.AiringAt || oldNextEp.Episode != newNextEp.Episode {
+	if oldHasNext != newHasNext {
 		return true
 	}
 
-	// Check if sub/dub count changed
-	if oldAnimeConverted.Episodes.Subbed != newAnime.Episodes.Subbed ||
-		oldAnimeConverted.Episodes.Dubbed != newAnime.Episodes.Dubbed {
+	if oldHasNext && newHasNext {
+		if oldAnime.NextAiring.AiringAt != newAnime.NextAiring.AiringAt ||
+			oldAnime.NextAiring.Episode != newAnime.NextAiring.Episode {
+			return true
+		}
+	}
+
+	if oldAnime.SubbedCount != newAnime.SubbedCount ||
+		oldAnime.DubbedCount != newAnime.DubbedCount {
 		return true
 	}
 
-	// Check if airing status changed
-	if oldAnimeConverted.Airing != newAnime.Airing ||
-		oldAnimeConverted.Status != newAnime.Status {
+	if oldAnime.Airing != newAnime.Airing ||
+		oldAnime.Status != newAnime.Status {
 		return true
 	}
 
-	// Check if the total episode count has changed
-	if oldAnimeConverted.Episodes.Total != newAnime.Episodes.Total {
+	if oldAnime.TotalEpisodes != newAnime.TotalEpisodes {
 		return true
 	}
 
-	// Check if number of episodes in the airing schedule changed
-	if len(oldAnimeConverted.AiringSchedule) != len(newAnime.AiringSchedule) {
+	if len(oldAnime.Schedule) != len(newAnime.Schedule) {
 		return true
 	}
 
-	// No significant changes detected
 	return false
 }

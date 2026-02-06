@@ -8,21 +8,22 @@ import (
 
 type Episode struct {
 	gorm.Model
-	EpisodeID     string      `gorm:"uniqueIndex;size:32" json:"id"`
-	AnimeID       uint        `json:"anime_id,omitempty"`
-	TitleID       uint        `json:"title_id,omitempty"`
-	Description   string      `gorm:"type:text" json:"description,omitempty"`
-	Aired         string      `json:"aired,omitempty"`
-	Score         float64     `json:"score,omitempty"`
-	Filler        bool        `json:"filler,omitempty"`
-	Recap         bool        `json:"recap,omitempty"`
-	ForumURL      string      `json:"forum_url,omitempty"`
-	URL           string      `json:"url,omitempty"`
-	ThumbnailURL  string      `json:"thumbnail_url,omitempty"`
-	EpisodeNumber int         `json:"episode_number,omitempty"`
-	EpisodeLength float64     `json:"episode_length,omitempty"`
-	Title         *Title      `gorm:"foreignKey:TitleID" json:"titles,omitempty"`
-	StreamInfo    *StreamInfo `gorm:"foreignKey:EpisodeID;references:EpisodeID" json:"streaming,omitempty"`
+	EpisodeID     string            `gorm:"uniqueIndex;size:32" json:"id"`
+	AnimeID       uint              `json:"anime_id,omitempty"`
+	TitleID       uint              `json:"title_id,omitempty"`
+	Description   string            `gorm:"type:text" json:"description,omitempty"`
+	Aired         string            `json:"aired,omitempty"`
+	Score         float64           `json:"score,omitempty"`
+	Filler        bool              `json:"filler,omitempty"`
+	Recap         bool              `json:"recap,omitempty"`
+	ForumURL      string            `json:"forum_url,omitempty"`
+	URL           string            `json:"url,omitempty"`
+	ThumbnailURL  string            `json:"thumbnail_url,omitempty"`
+	EpisodeNumber int               `json:"episode_number,omitempty"`
+	EpisodeLength float64           `json:"episode_length,omitempty"`
+	Title         *Title            `gorm:"foreignKey:TitleID" json:"titles,omitempty"`
+	StreamInfo    *StreamInfo       `gorm:"foreignKey:EpisodeID;references:EpisodeID" json:"streaming,omitempty"`
+	SkipTimes     []EpisodeSkipTime `gorm:"foreignKey:EpisodeID;references:EpisodeID" json:"skip_times,omitempty"`
 }
 
 type EpisodeSkipTime struct {
