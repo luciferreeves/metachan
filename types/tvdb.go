@@ -1,10 +1,12 @@
 package types
 
+type TMDBAuthData struct {
+	Token string `json:"token"`
+}
+
 type TVDBAuthResponse struct {
-	Status string `json:"status"`
-	Data   struct {
-		Token string `json:"token"`
-	} `json:"data"`
+	Status string       `json:"status"`
+	Data   TMDBAuthData `json:"data"`
 }
 
 type TVDBEpisode struct {
