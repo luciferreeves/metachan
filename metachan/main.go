@@ -28,8 +28,8 @@ func main() {
 	}))
 	app.Use(helmet.New())
 
-	router.Initialize(app)
 	middleware.Initialize(app)
+	router.Initialize(app)
 
 	// Start the server
 	if err := app.Listen(fmt.Sprintf("%s:%d", config.Server.Host, config.Server.Port)); err != nil {

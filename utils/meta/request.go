@@ -15,13 +15,14 @@ func Request(c *fiber.Ctx) facade {
 		logger.Errorf("META", "RequestContext missing in fiber locals")
 		return facade{}
 	}
-	return facade{req: req}
+	return facade{req: req, ctx: c}
 }
 
 func (f facade) Param(key string) (string, bool) {
-	for _, p := range f.req.Params {
-		if p.Key == key {
-			return p.Value, true
+	if f.ctx != nil {
+		val := f.ctx.Params(key)
+		if val != "" {
+			return val, true
 		}
 	}
 	return "", false
@@ -46,9 +47,11 @@ func (f facade) Header(key string) (string, bool) {
 }
 
 func (r required) Param(key string) string {
-	for _, p := range r.req.Params {
-		if p.Key == key {
-			return p.Value
+	// Access params directly from fiber context (available after route matching)
+	if r.ctx != nil {
+		val := r.ctx.Params(key)
+		if val != "" {
+			return val
 		}
 	}
 	logger.Errorf("META", "missing required param: %s", key)
@@ -76,9 +79,11 @@ func (r required) Header(key string) string {
 }
 
 func (d withDefault) Param(key string) string {
-	for _, p := range d.req.Params {
-		if p.Key == key {
-			return p.Value
+	// Access params directly from fiber context (available after route matching)
+	if d.ctx != nil {
+		val := d.ctx.Params(key)
+		if val != "" {
+			return val
 		}
 	}
 	return d.def
