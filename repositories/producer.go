@@ -5,7 +5,6 @@ import (
 	"metachan/entities"
 	"metachan/utils/logger"
 
-	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
@@ -30,17 +29,43 @@ func BatchCreateProducers(producers []entities.Producer) error {
 		return nil
 	}
 
-	result := DB.Session(&gorm.Session{FullSaveAssociations: true}).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "mal_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"url", "favorites", "count", "established", "about", "image_id",
-		}),
-	}).CreateInBatches(&producers, 100)
+	tx := DB.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
 
-	if result.Error != nil {
-		logger.Errorf("Producer", "Failed to batch create producers: %v", result.Error)
-		return errors.New("failed to batch create producers")
+	for i := range producers {
+		result := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "mal_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"url", "favorites", "count", "established", "about", "image_id",
+			}),
+		}).Omit("Titles", "ExternalURLs").Create(&producers[i])
+
+		if result.Error != nil {
+			tx.Rollback()
+			logger.Errorf("Producer", "Failed to create producer %d: %v", producers[i].MALID, result.Error)
+			return errors.New("failed to batch create producers")
+		}
+
+		if len(producers[i].Titles) > 0 {
+			if err := tx.Model(&producers[i]).Association("Titles").Replace(producers[i].Titles); err != nil {
+				tx.Rollback()
+				logger.Errorf("Producer", "Failed to associate titles for producer %d: %v", producers[i].MALID, err)
+				return errors.New("failed to batch create producers")
+			}
+		}
+
+		if len(producers[i].ExternalURLs) > 0 {
+			if err := tx.Model(&producers[i]).Association("ExternalURLs").Replace(producers[i].ExternalURLs); err != nil {
+				tx.Rollback()
+				logger.Errorf("Producer", "Failed to associate external URLs for producer %d: %v", producers[i].MALID, err)
+				return errors.New("failed to batch create producers")
+			}
+		}
 	}
 
-	return nil
+	return tx.Commit().Error
 }

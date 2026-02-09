@@ -94,6 +94,25 @@ func ProducerSync() error {
 			}
 		}
 
+		titleMap := make(map[string]entities.SimpleTitle)
+		for _, pd := range producersData {
+			for _, title := range pd.producer.Titles {
+				key := title.Type + ":" + title.Title
+				titleMap[key] = title
+			}
+		}
+
+		if len(titleMap) > 0 {
+			titles := make([]entities.SimpleTitle, 0, len(titleMap))
+			for _, title := range titleMap {
+				titles = append(titles, title)
+			}
+			if err := repositories.BatchCreateSimpleTitles(titles); err != nil {
+				logger.Errorf("ProducerSync", "Failed to batch insert titles: %v", err)
+				return err
+			}
+		}
+
 		var dbImages []entities.SimpleImage
 		if err := repositories.DB.Select("id, image_url").Find(&dbImages).Error; err != nil {
 			logger.Errorf("ProducerSync", "Failed to query images: %v", err)
@@ -105,6 +124,18 @@ func ProducerSync() error {
 			imageIDMap[img.ImageURL] = img.ID
 		}
 
+		var dbTitles []entities.SimpleTitle
+		if err := repositories.DB.Select("id, type, title").Find(&dbTitles).Error; err != nil {
+			logger.Errorf("ProducerSync", "Failed to query titles: %v", err)
+			return err
+		}
+
+		titleIDMap := make(map[string]uint)
+		for _, title := range dbTitles {
+			key := title.Type + ":" + title.Title
+			titleIDMap[key] = title.ID
+		}
+
 		producers := make([]entities.Producer, 0, len(producersData))
 		for _, pd := range producersData {
 			if pd.imageURL != "" {
@@ -112,6 +143,14 @@ func ProducerSync() error {
 					pd.producer.ImageID = &id
 				}
 			}
+
+			for i := range pd.producer.Titles {
+				key := pd.producer.Titles[i].Type + ":" + pd.producer.Titles[i].Title
+				if id, exists := titleIDMap[key]; exists {
+					pd.producer.Titles[i].ID = id
+				}
+			}
+
 			producers = append(producers, pd.producer)
 		}
 
