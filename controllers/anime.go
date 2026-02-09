@@ -4,6 +4,7 @@ import (
 	"errors"
 	"metachan/enums"
 	"metachan/repositories"
+	"metachan/services"
 	"metachan/utils/meta"
 
 	"github.com/gofiber/fiber/v2"
@@ -19,9 +20,14 @@ func GetAnime(c *fiber.Ctx) error {
 		return BadRequest(c, errors.New("invalid provider"))
 	}
 
-	anime, err := repositories.GetAnime(enums.MappingType(provider), id)
+	mapping, err := repositories.GetAnimeMapping(enums.MappingType(provider), id)
 	if err != nil {
-		return NotFound(c, errors.New("anime not found"))
+		return NotFound(c, err)
+	}
+
+	anime, err := services.GetAnime(&mapping)
+	if err != nil {
+		return InternalServerError(c, err)
 	}
 
 	return c.JSON(anime)

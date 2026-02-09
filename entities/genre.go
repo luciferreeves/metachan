@@ -1,9 +1,7 @@
 package entities
 
-import "gorm.io/gorm"
-
 type Genre struct {
-	gorm.Model
+	BaseModel
 	Name    string  `json:"name,omitempty"`
 	GenreID int     `gorm:"uniqueIndex" json:"genre_id,omitempty"`
 	URL     string  `json:"url,omitempty"`

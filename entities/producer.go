@@ -1,9 +1,7 @@
 package entities
 
-import "gorm.io/gorm"
-
 type Producer struct {
-	gorm.Model
+	BaseModel
 	MALID        int           `gorm:"uniqueIndex" json:"mal_id,omitempty"`
 	URL          string        `json:"url,omitempty"`
 	Favorites    int           `json:"favorites,omitempty"`

@@ -2,12 +2,10 @@ package entities
 
 import (
 	"metachan/enums"
-
-	"gorm.io/gorm"
 )
 
 type Mapping struct {
-	gorm.Model
+	BaseModel
 	AniDB               int                    `json:"anidb,omitempty"`
 	Anilist             int                    `json:"anilist,omitempty"`
 	AnimeCountdown      int                    `json:"anime_countdown,omitempty"`

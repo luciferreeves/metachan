@@ -126,7 +126,7 @@ func (c *client) makeRequest(ctx context.Context, url string) ([]byte, error) {
 }
 
 func GetSkipTimesForEpisode(malID, episodeNumber int) ([]types.AniskipResult, error) {
-	url := fmt.Sprintf("%s/skip-times/%d/%d?types=op&types=ed", aniskipBaseURL, malID, episodeNumber)
+	url := fmt.Sprintf("%s/skip-times/%d/%d?types=op&types=ed&episodeLength=0", aniskipBaseURL, malID, episodeNumber)
 	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
 
 	defer cancel()

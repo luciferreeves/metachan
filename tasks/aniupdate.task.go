@@ -57,7 +57,7 @@ func AnimeUpdate() error {
 		go func(workerID int) {
 			defer wg.Done()
 
-			logger.Debugf("AnimeUpdate", "Started worker #%d", workerID)
+			logger.Debugf("AnimeUpdate", "Started worker #%d", workerID+1)
 
 			for job := range jobs {
 				updateAnime(job.series, job.reason)

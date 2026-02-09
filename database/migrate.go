@@ -37,6 +37,7 @@ func migrate() {
 
 		// Episode entities
 		&entities.Episode{},
+		&entities.EpisodeSkipTime{},
 		&entities.StreamingSource{},
 		&entities.EpisodeSchedule{},
 		&entities.NextEpisode{},

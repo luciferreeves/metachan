@@ -1,10 +1,8 @@
 package entities
 
-import "gorm.io/gorm"
-
 type Character struct {
-	gorm.Model
-	AnimeID     uint         `json:"anime_id,omitempty"`
+	BaseModel
+	AnimeID     uint         `json:"-"`
 	MALID       int          `json:"mal_id,omitempty"`
 	URL         string       `json:"url,omitempty"`
 	ImageURL    string       `json:"image_url,omitempty"`
@@ -14,8 +12,8 @@ type Character struct {
 }
 
 type VoiceActor struct {
-	gorm.Model
-	CharacterID uint   `json:"character_id,omitempty"`
+	BaseModel
+	CharacterID uint   `json:"-"`
 	MALID       int    `json:"mal_id,omitempty"`
 	URL         string `json:"url,omitempty"`
 	Image       string `json:"image_url,omitempty"`
