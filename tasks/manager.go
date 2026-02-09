@@ -77,15 +77,23 @@ func (tm *TaskManager) StartTask(taskName string) {
 		return
 	}
 
+	if !shouldExec {
+		if lastLog, err := repositories.GetLatestTaskLog(taskName); err == nil && lastLog.Status == "success" {
+			repositories.SetTaskStatus(&entities.TaskStatus{
+				TaskName:    taskName,
+				IsCompleted: true,
+				LastRunAt:   lastLog.ExecutedAt,
+			})
+		}
+	}
+
 	doneChan := make(chan bool)
 	tm.Mutex.Lock()
 	tm.Done[taskName] = doneChan
 	tm.Mutex.Unlock()
 
 	go func() {
-		// Execute immediately if due
 		if shouldExec {
-			// Check dependencies before executing
 			if !tm.checkDependencies(task) {
 				logger.Warnf("TaskManager", "Task %s dependencies not met, skipping execution", taskName)
 			} else if err := task.Execute(); err != nil {
@@ -94,10 +102,15 @@ func (tm *TaskManager) StartTask(taskName string) {
 			} else {
 				task.LastRun = time.Now()
 				tm.logTaskExecution(taskName, "success", "Task executed successfully")
+				repositories.SetTaskStatus(&entities.TaskStatus{
+					TaskName:    taskName,
+					IsCompleted: true,
+					LastRunAt:   time.Now(),
+				})
 				logger.Successf("TaskManager", "Task %s executed successfully", taskName)
+				tm.triggerDependentTasks(taskName)
 			}
 		} else {
-			// Calculate time until next execution
 			var initialDelay time.Duration = task.Interval
 
 			if lastLog, err := repositories.GetLatestTaskLog(taskName); err == nil {
@@ -109,10 +122,8 @@ func (tm *TaskManager) StartTask(taskName string) {
 
 			logger.Infof("TaskManager", "Task %s will run in %v", taskName, initialDelay)
 
-			// Wait for initial delay before first execution
 			select {
 			case <-time.After(initialDelay):
-				// Check dependencies before executing
 				if !tm.checkDependencies(task) {
 					logger.Warnf("TaskManager", "Task %s dependencies not met, skipping execution", taskName)
 				} else if err := task.Execute(); err != nil {
@@ -121,30 +132,32 @@ func (tm *TaskManager) StartTask(taskName string) {
 				} else {
 					task.LastRun = time.Now()
 					tm.logTaskExecution(taskName, "success", "Task executed successfully")
+					repositories.SetTaskStatus(&entities.TaskStatus{
+						TaskName:    taskName,
+						IsCompleted: true,
+						LastRunAt:   time.Now(),
+					})
 					logger.Successf("TaskManager", "Task %s executed successfully", taskName)
+					tm.triggerDependentTasks(taskName)
 				}
 			case <-doneChan:
 				return
 			}
 		}
 
-		// Skip ticker creation for manual-only tasks (interval = 0)
 		if task.Interval == 0 {
 			logger.Debugf("TaskManager", "Task %s is manual-only (no scheduled interval)", taskName)
 			return
 		}
 
-		// Create ticker for subsequent executions
 		ticker := time.NewTicker(task.Interval)
 		tm.Mutex.Lock()
 		tm.Tickers[taskName] = ticker
 		tm.Mutex.Unlock()
 
-		// Regular ticker loop
 		for {
 			select {
 			case <-ticker.C:
-				// Check dependencies before executing
 				if !tm.checkDependencies(task) {
 					logger.Warnf("TaskManager", "Task %s dependencies not met, skipping execution", taskName)
 				} else if err := task.Execute(); err != nil {
@@ -153,7 +166,13 @@ func (tm *TaskManager) StartTask(taskName string) {
 				} else {
 					task.LastRun = time.Now()
 					tm.logTaskExecution(taskName, "success", "Task executed successfully")
+					repositories.SetTaskStatus(&entities.TaskStatus{
+						TaskName:    taskName,
+						IsCompleted: true,
+						LastRunAt:   time.Now(),
+					})
 					logger.Successf("TaskManager", "Task %s executed successfully", taskName)
+					tm.triggerDependentTasks(taskName)
 				}
 			case <-doneChan:
 				ticker.Stop()
@@ -205,7 +224,6 @@ func (tm *TaskManager) StopAllTasks() {
 	}
 }
 
-// checkDependencies verifies all task dependencies are complete
 func (tm *TaskManager) checkDependencies(task types.Task) bool {
 	if len(task.Dependencies) == 0 {
 		return true
@@ -220,6 +238,51 @@ func (tm *TaskManager) checkDependencies(task types.Task) bool {
 	}
 
 	return true
+}
+
+func (tm *TaskManager) triggerDependentTasks(completedTaskName string) {
+	tm.Mutex.Lock()
+	defer tm.Mutex.Unlock()
+
+	for taskName, task := range tm.Tasks {
+		hasDependency := false
+		for _, dep := range task.Dependencies {
+			if dep == completedTaskName {
+				hasDependency = true
+				break
+			}
+		}
+
+		if !hasDependency {
+			continue
+		}
+
+		tm.Mutex.Unlock()
+		allDependenciesMet := tm.checkDependencies(task)
+		tm.Mutex.Lock()
+
+		if allDependenciesMet {
+			logger.Infof("TaskManager", "All dependencies met for %s, triggering execution", taskName)
+			go func(name string, t types.Task) {
+				if err := t.Execute(); err != nil {
+					tm.logTaskExecution(name, "error", err.Error())
+					logger.Errorf("TaskManager", "Task %s execution failed: %v", name, err)
+				} else {
+					tm.Mutex.Lock()
+					t.LastRun = time.Now()
+					tm.Mutex.Unlock()
+					tm.logTaskExecution(name, "success", "Task executed successfully")
+					repositories.SetTaskStatus(&entities.TaskStatus{
+						TaskName:    name,
+						IsCompleted: true,
+						LastRunAt:   time.Now(),
+					})
+					logger.Successf("TaskManager", "Task %s executed successfully", name)
+					tm.triggerDependentTasks(name)
+				}
+			}(taskName, task)
+		}
+	}
 }
 
 func (tm *TaskManager) GetTaskStatus(taskName string) *types.TaskStatus {
@@ -256,7 +319,7 @@ func (tm *TaskManager) GetAllTaskStatuses() map[string]*types.TaskStatus {
 	statuses := make(map[string]*types.TaskStatus)
 	tm.Mutex.Lock()
 	for name := range tm.Tasks {
-		tm.Mutex.Unlock() // temporarily unlock to avoid deadlock / get task status
+		tm.Mutex.Unlock()
 		statuses[name] = tm.GetTaskStatus(name)
 		tm.Mutex.Lock()
 	}

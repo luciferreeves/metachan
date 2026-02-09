@@ -38,6 +38,17 @@ func ProducerSync() error {
 		imageMap := make(map[string]struct{})
 
 		for i, producerData := range batchData {
+			// Check if producer was updated within last 3 days - if so, skip detail fetch
+			var existingProducer entities.Producer
+			if err := repositories.DB.Where("mal_id = ?", producerData.MALID).First(&existingProducer).Error; err == nil {
+				// Producer exists, check if updated within last 3 days
+				threeDaysAgo := time.Now().Add(-3 * 24 * time.Hour)
+				if existingProducer.UpdatedAt.After(threeDaysAgo) {
+					logger.Debugf("ProducerSync", "Skipping producer %d (MAL ID: %d) - updated %v ago", i+1, producerData.MALID, time.Since(existingProducer.UpdatedAt).Round(time.Hour))
+					continue
+				}
+			}
+
 			producerDetail, err := jikan.GetProducerByID(producerData.MALID)
 			if err != nil {
 				logger.Warnf("ProducerSync", "Failed to fetch details for producer %d: %v", producerData.MALID, err)

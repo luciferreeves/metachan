@@ -16,7 +16,7 @@ type Mapping struct {
 	IMDB                string                 `json:"imdb,omitempty"`
 	Kitsu               int                    `json:"kitsu,omitempty"`
 	LiveChart           int                    `json:"live_chart,omitempty"`
-	MAL                 int                    `json:"mal,omitempty"`
+	MAL                 int                    `gorm:"uniqueIndex" json:"mal,omitempty"`
 	NotifyMoe           string                 `json:"notify_moe,omitempty"`
 	Simkl               int                    `json:"simkl,omitempty"`
 	TMDB                int                    `json:"tmdb,omitempty"`

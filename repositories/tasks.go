@@ -4,6 +4,8 @@ import (
 	"errors"
 	"metachan/entities"
 	"metachan/utils/logger"
+
+	"gorm.io/gorm/clause"
 )
 
 func GetTaskStatus(taskName string) (entities.TaskStatus, error) {
@@ -19,7 +21,10 @@ func GetTaskStatus(taskName string) (entities.TaskStatus, error) {
 }
 
 func SetTaskStatus(task *entities.TaskStatus) error {
-	result := DB.Save(task)
+	result := DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "task_name"}},
+		DoUpdates: clause.AssignmentColumns([]string{"is_completed", "last_run_at", "updated_at"}),
+	}).Create(task)
 
 	if result.Error != nil {
 		logger.Errorf("Task", "Failed to set task status for %s: %v", task.TaskName, result.Error)
