@@ -1,6 +1,7 @@
 package services
 
 import (
+	"crypto/md5"
 	"fmt"
 	"metachan/entities"
 	"metachan/enums"
@@ -315,6 +316,12 @@ func applyJikanData(anime *entities.Anime, jikanAnime *types.JikanAnimeResponse,
 			}
 		}
 
+		titleForID := je.Title
+		if titleForID == "" {
+			titleForID = je.TitleRomaji
+		}
+		episode.EpisodeID = generateEpisodeID(anime.MALID, je.MALID, titleForID)
+
 		anime.Episodes = append(anime.Episodes, episode)
 	}
 
@@ -486,11 +493,11 @@ func applyStreamingData(anime *entities.Anime) {
 		return
 	}
 
-	logger.Infof("AnimeService", "Fetching streaming counts for: %s", searchTitle)
 	subCount, dubCount, err := streaming.GetStreamingCounts(searchTitle)
-	if err != nil {
-		if anime.Title.English != "" && anime.Title.English != searchTitle {
-			subCount, dubCount, err = streaming.GetStreamingCounts(anime.Title.English)
+	if err != nil && anime.Title.English != "" && anime.Title.English != searchTitle {
+		subCount, dubCount, err = streaming.GetStreamingCounts(anime.Title.English)
+		if err == nil {
+			searchTitle = anime.Title.English
 		}
 	}
 
@@ -501,7 +508,39 @@ func applyStreamingData(anime *entities.Anime) {
 
 	anime.SubbedCount = subCount
 	anime.DubbedCount = dubCount
-	logger.Infof("AnimeService", "Streaming counts - Subbed: %d, Dubbed: %d", subCount, dubCount)
+
+	if len(anime.Episodes) > 0 {
+		epNums := make([]int, len(anime.Episodes))
+		for i, ep := range anime.Episodes {
+			epNums[i] = ep.EpisodeNumber
+		}
+		sourcesMap, err := streaming.FetchAllEpisodeSources(searchTitle, epNums)
+		if err == nil {
+			for i := range anime.Episodes {
+				ep := &anime.Episodes[i]
+				if s, ok := sourcesMap[ep.EpisodeNumber]; ok {
+					sub := make([]entities.StreamingSource, len(s.Sub))
+					for j, src := range s.Sub {
+						sub[j] = entities.StreamingSource{URL: src.URL, Server: src.Server, Type: src.Type}
+					}
+					dub := make([]entities.StreamingSource, len(s.Dub))
+					for j, src := range s.Dub {
+						dub[j] = entities.StreamingSource{URL: src.URL, Server: src.Server, Type: src.Type}
+					}
+					ep.StreamInfo = &entities.StreamInfo{
+						SubSources: sub,
+						DubSources: dub,
+					}
+				}
+			}
+		}
+	}
+}
+
+func generateEpisodeID(malID int, episodeNumber int, title string) string {
+	unique := fmt.Sprintf("%d-%d-%s", malID, episodeNumber, title)
+	hash := md5.Sum([]byte(unique))
+	return fmt.Sprintf("%x", hash)
 }
 
 func applySeasonData(anime *entities.Anime, mapping *entities.Mapping) {
@@ -710,6 +749,14 @@ func saveAnime(anime *entities.Anime, skipTimeMap map[string][]entities.EpisodeS
 	if len(anime.Episodes) > 0 {
 		if err := repositories.SaveAnimeEpisodes(anime.ID, anime.Episodes); err != nil {
 			logger.Warnf("AnimeService", "Failed to save episodes: %v", err)
+		}
+		for i := range anime.Episodes {
+			ep := &anime.Episodes[i]
+			if ep.StreamInfo != nil && ep.EpisodeID != "" {
+				if err := repositories.SaveEpisodeStreamInfo(anime.ID, ep.EpisodeID, ep.StreamInfo); err != nil {
+					logger.Warnf("AnimeService", "Failed to save stream info for episode %s: %v", ep.EpisodeID, err)
+				}
+			}
 		}
 	}
 

@@ -27,6 +27,24 @@ func GetAnime(c *fiber.Ctx) error {
 	return c.JSON(anime)
 }
 
+func GetAnimeEpisodes(c *fiber.Ctx) error {
+	id := meta.Request(c).MustHave().Param("id")
+	provider := meta.Request(c).Default("mal").Query("provider")
+
+	switch provider {
+	case "mal", "anilist":
+	default:
+		return BadRequest(c, errors.New("invalid provider"))
+	}
+
+	episodes, err := repositories.GetAnimeEpisodes(enums.MappingType(provider), id)
+	if err != nil {
+		return NotFound(c, err)
+	}
+
+	return c.JSON(episodes)
+}
+
 // -- Old Code Below --
 
 // import (

@@ -514,6 +514,56 @@ func GetStreamingSources(title string, episodeNumber int) (*types.StreamAnimeStr
 	return streaming, nil
 }
 
+func FetchAllEpisodeSources(title string, episodeNumbers []int) (map[int]*types.StreamAnimeStreaming, error) {
+	searchResults, err := SearchAnime(title)
+	if err != nil || len(searchResults) == 0 {
+		return nil, errors.New("no streaming sources found")
+	}
+
+	bestMatch := searchResults[0]
+
+	subSet := make(map[string]bool)
+	dubSet := make(map[string]bool)
+
+	if bestMatch.SubEpisodes > 0 {
+		if eps, err := GetEpisodesList(bestMatch.ID, "sub"); err == nil {
+			for _, e := range eps {
+				subSet[e] = true
+			}
+		}
+	}
+	if bestMatch.DubEpisodes > 0 {
+		if eps, err := GetEpisodesList(bestMatch.ID, "dub"); err == nil {
+			for _, e := range eps {
+				dubSet[e] = true
+			}
+		}
+	}
+
+	result := make(map[int]*types.StreamAnimeStreaming)
+	for _, epNum := range episodeNumbers {
+		epStr := fmt.Sprintf("%d", epNum)
+		s := &types.StreamAnimeStreaming{
+			Sub: []types.StreamAnimeStreamingSource{},
+			Dub: []types.StreamAnimeStreamingSource{},
+		}
+		if subSet[epStr] {
+			if sources, err := GetEpisodeLinks(bestMatch.ID, epStr, "sub"); err == nil {
+				s.Sub = sources
+			}
+		}
+		if dubSet[epStr] {
+			if sources, err := GetEpisodeLinks(bestMatch.ID, epStr, "dub"); err == nil {
+				s.Dub = sources
+			}
+		}
+		if len(s.Sub) > 0 || len(s.Dub) > 0 {
+			result[epNum] = s
+		}
+	}
+	return result, nil
+}
+
 func GetStreamingCounts(title string) (int, int, error) {
 	searchResults, err := SearchAnime(title)
 	if err != nil {

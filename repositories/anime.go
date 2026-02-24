@@ -6,6 +6,7 @@ import (
 	"metachan/entities"
 	"metachan/enums"
 	"metachan/utils/logger"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -207,6 +208,52 @@ func SaveEpisodeSkipTimes(episodeID string, skipTimes []entities.EpisodeSkipTime
 	}
 
 	return nil
+}
+
+func GetAnimeEpisodes[T idType](maptype enums.MappingType, id T) ([]entities.Episode, error) {
+	mapping, err := GetAnimeMapping(maptype, id)
+	if err != nil {
+		return nil, errors.New("anime not found")
+	}
+
+	var anime entities.Anime
+	if err := DB.Where("mapping_id = ?", mapping.ID).Select("id").First(&anime).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		return nil, errors.New("anime not found")
+	}
+
+	var episodes []entities.Episode
+	result := DB.
+		Preload("Title").
+		Preload("SkipTimes").
+		Preload("StreamInfo").
+		Preload("StreamInfo.SubSources").
+		Preload("StreamInfo.DubSources").
+		Where("anime_id = ?", anime.ID).
+		Order("episode_number asc").
+		Find(&episodes)
+
+	if result.Error != nil {
+		return nil, errors.New("failed to fetch episodes")
+	}
+
+	return episodes, nil
+}
+
+func SaveEpisodeStreamInfo(animeID uint, episodeID string, info *entities.StreamInfo) error {
+	info.AnimeID = animeID
+	info.EpisodeID = episodeID
+	info.LastFetch = time.Now()
+
+	var existing entities.StreamInfo
+	if DB.Where("episode_id = ? AND anime_id = ?", episodeID, animeID).First(&existing).Error == nil {
+		info.ID = existing.ID
+		DB.Where("stream_info_id = ?", existing.ID).Delete(&entities.StreamingSource{})
+	}
+
+	return DB.Session(&gorm.Session{FullSaveAssociations: true}).Save(info).Error
 }
 
 func GetAllAnimeStubs() ([]animeStub, error) {
