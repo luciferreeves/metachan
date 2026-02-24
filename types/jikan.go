@@ -181,6 +181,35 @@ type JikanAnimeCharacterResponse struct {
 	Data []JikanSingleCharacter `json:"data"`
 }
 
+type JikanCharacterSimpleAnime struct {
+	MALID  int                     `json:"mal_id"`
+	URL    string                  `json:"url"`
+	Images JikanGenericImageEntity `json:"images"`
+	Title  string                  `json:"title"`
+}
+
+type JikanCharacterAnimeEntry struct {
+	Role  string                    `json:"role"`
+	Anime JikanCharacterSimpleAnime `json:"anime"`
+}
+
+type JikanFullCharacterData struct {
+	MALID     int                        `json:"mal_id"`
+	URL       string                     `json:"url"`
+	Images    JikanGenericImageEntity    `json:"images"`
+	Name      string                     `json:"name"`
+	NameKanji string                     `json:"name_kanji"`
+	Nicknames []string                   `json:"nicknames"`
+	Favorites int                        `json:"favorites"`
+	About     string                     `json:"about"`
+	Anime     []JikanCharacterAnimeEntry `json:"anime"`
+	Voices    []JikanVoiceActor          `json:"voices"`
+}
+
+type JikanCharacterFullResponse struct {
+	Data JikanFullCharacterData `json:"data"`
+}
+
 type JikanGenre struct {
 	MALID int    `json:"mal_id"`
 	Name  string `json:"name"`

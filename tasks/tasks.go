@@ -67,6 +67,17 @@ func init() {
 		if err != nil {
 			logger.Errorf("TaskManager", "Failed to register AnimeSync task: %v", err)
 		}
+
+		err = GlobalTaskManager.RegisterTask(types.Task{
+			Name:         "CharacterSync",
+			Interval:     0,
+			Execute:      CharacterSync,
+			OnResume:     ResumeCharacterEnrichment,
+			Dependencies: []string{"AnimeSync"},
+		})
+		if err != nil {
+			logger.Errorf("TaskManager", "Failed to register CharacterSync task: %v", err)
+		}
 	}
 
 	// Register AnimeUpdate task (every 15 minutes)

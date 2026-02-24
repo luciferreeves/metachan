@@ -59,14 +59,12 @@ func ReplaceProducerExternalURLs(producer *entities.Producer, urls []entities.Ex
 }
 
 func UpdateProducerDetails(id uint, url, established, about string, favorites, count int, imageURL string) error {
-	now := time.Now()
 	updates := map[string]interface{}{
 		"url":         url,
 		"favorites":   favorites,
 		"count":       count,
 		"established": established,
 		"about":       about,
-		"enriched_at": now,
 	}
 	if imageURL != "" {
 		img := entities.SimpleImage{ImageURL: imageURL}
@@ -122,4 +120,9 @@ func BatchCreateProducers(producers []entities.Producer) error {
 	}
 
 	return tx.Commit().Error
+}
+
+func SetProducerEnriched(id uint) error {
+	now := time.Now()
+	return DB.Model(&entities.Producer{}).Where("id = ?", id).Update("enriched_at", now).Error
 }

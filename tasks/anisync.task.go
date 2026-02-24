@@ -86,8 +86,10 @@ func ResumeAnimeSync() {
 
 		sevenDaysAgo := time.Now().Add(-7 * 24 * time.Hour)
 		updatedAt := make(map[int]time.Time, len(stubs))
+		enrichedAt := make(map[int]*time.Time, len(stubs))
 		for _, s := range stubs {
 			updatedAt[s.MALID] = s.UpdatedAt
+			enrichedAt[s.MALID] = s.EnrichedAt
 		}
 
 		var toProcess []entities.Mapping
@@ -96,7 +98,7 @@ func ResumeAnimeSync() {
 				continue
 			}
 			t, exists := updatedAt[m.MAL]
-			if !exists || t.Before(sevenDaysAgo) {
+			if !exists || t.Before(sevenDaysAgo) || enrichedAt[m.MAL] == nil {
 				toProcess = append(toProcess, m)
 			}
 		}

@@ -773,5 +773,8 @@ func saveAnime(anime *entities.Anime, skipTimeMap map[string][]entities.EpisodeS
 	}
 
 	logger.Successf("AnimeService", "Saved anime with %d episodes, %d characters, %d skip time entries", len(anime.Episodes), len(anime.Characters), len(skipTimeMap))
+	if err := repositories.SetAnimeEnriched(anime.MALID); err != nil {
+		logger.Warnf("AnimeService", "Failed to stamp enriched_at for anime %d: %v", anime.MALID, err)
+	}
 	return nil
 }

@@ -76,77 +76,6 @@ func GetAnime[T idType](maptype enums.MappingType, id T) (entities.Anime, error)
 	return anime, nil
 }
 
-func loadAnimeCharacters(anime *entities.Anime) {
-	var rows []struct {
-		CharacterID uint
-		Role        string
-	}
-	DB.Table("anime_characters").
-		Select("character_id, role").
-		Where("anime_id = ?", anime.ID).
-		Scan(&rows)
-
-	for _, row := range rows {
-		var char entities.Character
-		if err := DB.First(&char, row.CharacterID).Error; err != nil {
-			continue
-		}
-		DB.Preload("VoiceActor").
-			Where("character_id = ?", char.ID).
-			Find(&char.VoiceActors)
-		char.Role = row.Role
-		anime.Characters = append(anime.Characters, char)
-	}
-}
-
-func SaveAnimeCharacters(animeID uint, characters []entities.Character) error {
-	for i := range characters {
-		char := &characters[i]
-
-		DB.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "mal_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"url", "image_url", "name"}),
-		}).Create(char)
-		if char.ID == 0 {
-			DB.Where("mal_id = ?", char.MALID).First(char)
-		}
-
-		DB.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "anime_id"}, {Name: "character_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"role"}),
-		}).Create(&entities.AnimeCharacter{
-			AnimeID:     animeID,
-			CharacterID: char.ID,
-			Role:        char.Role,
-		})
-
-		for _, cva := range char.VoiceActors {
-			va := cva.VoiceActor
-			if va == nil {
-				continue
-			}
-
-			DB.Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "mal_id"}},
-				DoUpdates: clause.AssignmentColumns([]string{"url", "image", "name"}),
-			}).Create(va)
-			if va.ID == 0 {
-				DB.Where("mal_id = ?", va.MALID).First(va)
-			}
-
-			DB.Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "character_id"}, {Name: "voice_actor_id"}},
-				DoUpdates: clause.AssignmentColumns([]string{"language"}),
-			}).Create(&entities.CharacterVoiceActor{
-				CharacterID:  char.ID,
-				VoiceActorID: va.ID,
-				Language:     cva.Language,
-			})
-		}
-	}
-	return nil
-}
-
 func CreateOrUpdateAnime(anime *entities.Anime) error {
 	if anime == nil {
 		return fmt.Errorf("anime is nil")
@@ -157,6 +86,9 @@ func CreateOrUpdateAnime(anime *entities.Anime) error {
 	if result.Error == nil {
 		anime.ID = existingAnime.ID
 	}
+
+	now := time.Now()
+	anime.LastUpdated = now
 
 	result = DB.Session(&gorm.Session{FullSaveAssociations: true}).Clauses(clause.OnConflict{
 		UpdateAll: true,
@@ -210,6 +142,40 @@ func SaveEpisodeSkipTimes(episodeID string, skipTimes []entities.EpisodeSkipTime
 	return nil
 }
 
+func GetAnimeEpisode[T idType](maptype enums.MappingType, id T, episodeID string) (entities.Episode, error) {
+	mapping, err := GetAnimeMapping(maptype, id)
+	if err != nil {
+		return entities.Episode{}, errors.New("anime not found")
+	}
+
+	var anime entities.Anime
+	if err := DB.Where("mapping_id = ?", mapping.ID).Select("id").First(&anime).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return entities.Episode{}, err
+		}
+		return entities.Episode{}, errors.New("anime not found")
+	}
+
+	var episode entities.Episode
+	result := DB.
+		Preload("Title").
+		Preload("SkipTimes").
+		Preload("StreamInfo").
+		Preload("StreamInfo.SubSources").
+		Preload("StreamInfo.DubSources").
+		Where("anime_id = ? AND episode_id = ?", anime.ID, episodeID).
+		First(&episode)
+
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return entities.Episode{}, result.Error
+		}
+		return entities.Episode{}, errors.New("failed to fetch episode")
+	}
+
+	return episode, nil
+}
+
 func GetAnimeEpisodes[T idType](maptype enums.MappingType, id T) ([]entities.Episode, error) {
 	mapping, err := GetAnimeMapping(maptype, id)
 	if err != nil {
@@ -258,10 +224,15 @@ func SaveEpisodeStreamInfo(animeID uint, episodeID string, info *entities.Stream
 
 func GetAllAnimeStubs() ([]animeStub, error) {
 	var stubs []animeStub
-	if err := DB.Model(&entities.Anime{}).Select("mal_id, updated_at").Scan(&stubs).Error; err != nil {
+	if err := DB.Model(&entities.Anime{}).Select("mal_id, updated_at, enriched_at").Scan(&stubs).Error; err != nil {
 		return nil, err
 	}
 	return stubs, nil
+}
+
+func SetAnimeEnriched(malID int) error {
+	now := time.Now()
+	return DB.Model(&entities.Anime{}).Where("mal_id = ?", malID).Update("enriched_at", now).Error
 }
 
 func GetAiringAnime() ([]entities.Anime, error) {

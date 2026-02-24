@@ -50,6 +50,7 @@ func migrate() {
 		&entities.VoiceActor{},
 		&entities.AnimeCharacter{},
 		&entities.CharacterVoiceActor{},
+		&entities.CharacterAnimeAppearance{},
 	)
 	if err != nil {
 		logger.Fatalf("Database", "Error during database migration: %v", err)

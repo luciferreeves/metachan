@@ -30,6 +30,7 @@ type Anime struct {
 	TotalEpisodes  int               `json:"total_episodes,omitempty"`
 	AiredEpisodes  int               `json:"aired_episodes,omitempty"`
 	LastUpdated    time.Time         `json:"-"`
+	EnrichedAt     *time.Time        `json:"-"`
 	Title          *Title            `gorm:"foreignKey:TitleID" json:"titles,omitempty"`
 	Mapping        *Mapping          `gorm:"foreignKey:MappingID" json:"mappings,omitempty"`
 	Images         *Images           `gorm:"foreignKey:ImagesID" json:"images,omitempty"`

@@ -316,3 +316,22 @@ func GetProducerByID(producerID int) (*types.JikanSingleProducerResponse, error)
 	}
 	return &response, nil
 }
+
+func GetCharacterByMALID(id int) (*types.JikanCharacterFullResponse, error) {
+	url := fmt.Sprintf("%s/characters/%d/full", jikanAPIBaseURL, id)
+	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
+	defer cancel()
+
+	bytes, err := clientInstance.makeRequest(ctx, url)
+	if err != nil {
+		logger.Errorf("JikanClient", "GetCharacterByMALID failed for ID %d: %v", id, err)
+		return nil, errors.New("failed to fetch character data from Jikan API")
+	}
+
+	var response types.JikanCharacterFullResponse
+	if err := json.Unmarshal(bytes, &response); err != nil {
+		logger.Errorf("JikanClient", "Failed to unmarshal character response for ID %d: %v", id, err)
+		return nil, errors.New("failed to parse character data from Jikan API")
+	}
+	return &response, nil
+}

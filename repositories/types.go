@@ -14,6 +14,16 @@ type idType interface {
 }
 
 type animeStub struct {
-	MALID     int
-	UpdatedAt time.Time
+	MALID      int
+	UpdatedAt  time.Time
+	EnrichedAt *time.Time
+}
+
+type animeCharacterRow struct {
+	Role string
+}
+
+type characterStub struct {
+	MALID      int
+	EnrichedAt *time.Time
 }

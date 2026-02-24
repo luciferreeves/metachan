@@ -202,6 +202,10 @@ func enrichProducersInBackground() {
 			}
 		}
 
+		if err := repositories.SetProducerEnriched(p.ID); err != nil {
+			logger.Warnf("ProducerSync", "Failed to stamp enriched_at for producer %d: %v", p.MALID, err)
+		}
+
 		enriched++
 		if (i+1)%10 == 0 || (i+1) == total {
 			progress, eta := calculateProgress(i+1, total, startTime)
