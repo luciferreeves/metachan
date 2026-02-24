@@ -1,5 +1,7 @@
 package entities
 
+import "time"
+
 type Producer struct {
 	BaseModel
 	MALID        int           `gorm:"uniqueIndex" json:"mal_id,omitempty"`
@@ -8,6 +10,7 @@ type Producer struct {
 	Count        int           `json:"count,omitempty"`
 	Established  string        `json:"established,omitempty"`
 	About        string        `gorm:"type:text" json:"about,omitempty"`
+	EnrichedAt   *time.Time    `json:"-"`
 	ImageID      *uint         `json:"-"`
 	Image        *SimpleImage  `gorm:"foreignKey:ImageID" json:"image,omitempty"`
 	Titles       []SimpleTitle `gorm:"many2many:producer_titles" json:"titles,omitempty"`

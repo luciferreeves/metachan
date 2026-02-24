@@ -23,6 +23,7 @@ func init() {
 		Name:     "ProducerSync",
 		Interval: 7 * 24 * time.Hour,
 		Execute:  ProducerSync,
+		OnResume: ResumeProducerEnrichment,
 	})
 
 	if err != nil {

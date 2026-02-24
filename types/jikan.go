@@ -159,21 +159,22 @@ type JikanAnimeEpisodeResponse struct {
 	Data       []JikanAnimeSingleEpisode    `json:"data"`
 }
 
+type JikanCharacterPerson struct {
+	MALID  int                     `json:"mal_id"`
+	URL    string                  `json:"url"`
+	Images JikanGenericImageEntity `json:"images"`
+	Name   string                  `json:"name"`
+}
+
 type JikanSingleCharacter struct {
-	MALID       int                     `json:"mal_id"`
-	URL         string                  `json:"url"`
-	Images      JikanGenericImageEntity `json:"images"`
-	Name        string                  `json:"name"`
-	Role        string                  `json:"role"`
-	VoiceActors []JikanVoiceActor       `json:"voice_actors"`
+	Character   JikanCharacterPerson `json:"character"`
+	Role        string               `json:"role"`
+	VoiceActors []JikanVoiceActor    `json:"voice_actors"`
 }
 
 type JikanVoiceActor struct {
-	MALID    int                     `json:"mal_id"`
-	URL      string                  `json:"url"`
-	Images   JikanGenericImageEntity `json:"images"`
-	Name     string                  `json:"name"`
-	Language string                  `json:"language"`
+	Person   JikanCharacterPerson `json:"person"`
+	Language string               `json:"language"`
 }
 
 type JikanAnimeCharacterResponse struct {

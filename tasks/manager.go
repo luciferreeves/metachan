@@ -92,6 +92,10 @@ func (tm *TaskManager) StartTask(taskName string) {
 	tm.Done[taskName] = doneChan
 	tm.Mutex.Unlock()
 
+	if task.OnResume != nil {
+		go task.OnResume()
+	}
+
 	go func() {
 		if shouldExec {
 			if !tm.checkDependencies(task) {

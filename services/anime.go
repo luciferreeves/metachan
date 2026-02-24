@@ -282,29 +282,27 @@ func applyJikanData(anime *entities.Anime, jikanAnime *types.JikanAnimeResponse,
 
 	if jikanCharacters != nil {
 		for _, jc := range jikanCharacters.Data {
-			character := entities.Character{
-				MALID:    jc.MALID,
-				Name:     jc.Name,
+			char := entities.Character{
+				MALID:    jc.Character.MALID,
+				Name:     jc.Character.Name,
+				URL:      jc.Character.URL,
+				ImageURL: jc.Character.Images.JPG.ImageURL,
 				Role:     jc.Role,
-				URL:      jc.URL,
-				ImageURL: jc.Images.JPG.ImageURL,
 			}
 
-			if len(jc.VoiceActors) > 0 {
-				for _, va := range jc.VoiceActors {
-					if va.Language == "Japanese" {
-						character.VoiceActors = append(character.VoiceActors, entities.VoiceActor{
-							MALID:    va.MALID,
-							Name:     va.Name,
-							Language: va.Language,
-							URL:      va.URL,
-							Image:    va.Images.JPG.ImageURL,
-						})
-					}
-				}
+			for _, va := range jc.VoiceActors {
+				char.VoiceActors = append(char.VoiceActors, entities.CharacterVoiceActor{
+					Language: va.Language,
+					VoiceActor: &entities.VoiceActor{
+						MALID: va.Person.MALID,
+						Name:  va.Person.Name,
+						URL:   va.Person.URL,
+						Image: va.Person.Images.JPG.ImageURL,
+					},
+				})
 			}
 
-			anime.Characters = append(anime.Characters, character)
+			anime.Characters = append(anime.Characters, char)
 		}
 	}
 }
@@ -669,6 +667,18 @@ func saveAnime(anime *entities.Anime, skipTimeMap map[string][]entities.EpisodeS
 
 	if err := repositories.CreateOrUpdateAnime(anime); err != nil {
 		return fmt.Errorf("failed to save anime: %w", err)
+	}
+
+	if len(anime.Episodes) > 0 {
+		if err := repositories.SaveAnimeEpisodes(anime.ID, anime.Episodes); err != nil {
+			logger.Warnf("AnimeService", "Failed to save episodes: %v", err)
+		}
+	}
+
+	if len(anime.Characters) > 0 {
+		if err := repositories.SaveAnimeCharacters(anime.ID, anime.Characters); err != nil {
+			logger.Warnf("AnimeService", "Failed to save characters: %v", err)
+		}
 	}
 
 	for episodeID, skipTimes := range skipTimeMap {

@@ -4,24 +4,78 @@ import (
 	"errors"
 	"metachan/entities"
 	"metachan/utils/logger"
+	"time"
 
 	"gorm.io/gorm/clause"
 )
 
 func CreateOrUpdateProducer(producer *entities.Producer) error {
+	for i := range producer.Titles {
+		t := &producer.Titles[i]
+		DB.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "type"}, {Name: "title"}},
+			DoNothing: true,
+		}).Create(t)
+		if t.ID == 0 {
+			DB.Where("type = ? AND title = ?", t.Type, t.Title).First(t)
+		}
+	}
+
 	result := DB.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "mal_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"url", "favorites", "count", "established", "about", "image_id",
 		}),
-	}).Create(producer)
+	}).Omit("Titles").Create(producer)
 
 	if result.Error != nil {
 		logger.Errorf("Producer", "Failed to create or update producer: %v", result.Error)
 		return errors.New("failed to create or update producer")
 	}
 
+	if len(producer.Titles) > 0 {
+		if err := DB.Model(producer).Association("Titles").Replace(producer.Titles); err != nil {
+			logger.Errorf("Producer", "Failed to associate titles for producer %d: %v", producer.MALID, err)
+		}
+	}
+
 	return nil
+}
+
+func GetAllProducers() ([]entities.Producer, error) {
+	var producers []entities.Producer
+	if err := DB.Select("id, mal_id, enriched_at").Find(&producers).Error; err != nil {
+		return nil, err
+	}
+	return producers, nil
+}
+
+func GetProducerExternalURLCount(producer *entities.Producer) int64 {
+	return DB.Model(producer).Association("ExternalURLs").Count()
+}
+
+func ReplaceProducerExternalURLs(producer *entities.Producer, urls []entities.ExternalURL) error {
+	return DB.Model(producer).Association("ExternalURLs").Replace(urls)
+}
+
+func UpdateProducerDetails(id uint, url, established, about string, favorites, count int, imageURL string) error {
+	now := time.Now()
+	updates := map[string]interface{}{
+		"url":         url,
+		"favorites":   favorites,
+		"count":       count,
+		"established": established,
+		"about":       about,
+		"enriched_at": now,
+	}
+	if imageURL != "" {
+		img := entities.SimpleImage{ImageURL: imageURL}
+		imgID, err := CreateOrUpdateSimpleImage(&img)
+		if err == nil && imgID != 0 {
+			updates["image_id"] = imgID
+		}
+	}
+	return DB.Model(&entities.Producer{}).Where("id = ?", id).Updates(updates).Error
 }
 
 func BatchCreateProducers(producers []entities.Producer) error {

@@ -48,6 +48,8 @@ func migrate() {
 		// Character/Persona entities
 		&entities.Character{},
 		&entities.VoiceActor{},
+		&entities.AnimeCharacter{},
+		&entities.CharacterVoiceActor{},
 	)
 	if err != nil {
 		logger.Fatalf("Database", "Error during database migration: %v", err)

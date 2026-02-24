@@ -9,6 +9,12 @@ import (
 	"time"
 )
 
+// ResumeProducerEnrichment is called on startup to resume any background enrichment
+// that was interrupted by a previous shutdown.
+func ResumeProducerEnrichment() {
+	go enrichProducersInBackground()
+}
+
 func ProducerSync() error {
 	logger.Infof("ProducerSync", "Starting producer sync (includes studios and licensors)")
 
@@ -27,7 +33,7 @@ func ProducerSync() error {
 
 	logger.Successf("ProducerSync", "Saved basic data for %d producers, enriching external URLs in background", total)
 
-	go enrichProducersInBackground(response.Data)
+	go enrichProducersInBackground()
 
 	return nil
 }
@@ -99,24 +105,16 @@ func saveProducerListData(producersData []types.JikanSingleProducer) error {
 			}
 		}
 
-		var dbImages []entities.SimpleImage
-		if err := repositories.DB.Select("id, image_url").Find(&dbImages).Error; err != nil {
+		imageIDMap, err := repositories.GetAllImagesMapped()
+		if err != nil {
 			logger.Errorf("ProducerSync", "Failed to query images: %v", err)
 			return err
 		}
-		imageIDMap := make(map[string]uint)
-		for _, img := range dbImages {
-			imageIDMap[img.ImageURL] = img.ID
-		}
 
-		var dbTitles []entities.SimpleTitle
-		if err := repositories.DB.Select("id, type, title").Find(&dbTitles).Error; err != nil {
+		titleIDMap, err := repositories.GetAllTitlesMapped()
+		if err != nil {
 			logger.Errorf("ProducerSync", "Failed to query titles: %v", err)
 			return err
-		}
-		titleIDMap := make(map[string]uint)
-		for _, t := range dbTitles {
-			titleIDMap[t.Type+":"+t.Title] = t.ID
 		}
 
 		producers := make([]entities.Producer, 0, len(producerItems))
@@ -147,42 +145,61 @@ func saveProducerListData(producersData []types.JikanSingleProducer) error {
 	return nil
 }
 
-func enrichProducersInBackground(producersData []types.JikanSingleProducer) {
-	total := len(producersData)
+func enrichProducersInBackground() {
+	producers, err := repositories.GetAllProducers()
+	if err != nil {
+		logger.Errorf("ProducerSync", "Failed to load producers for enrichment: %v", err)
+		return
+	}
+
+	sevenDaysAgo := time.Now().Add(-7 * 24 * time.Hour)
+
+	// Pre-check: skip entire run if nothing qualifies
+	hasWork := false
+	for _, p := range producers {
+		if p.EnrichedAt == nil || !p.EnrichedAt.After(sevenDaysAgo) {
+			hasWork = true
+			break
+		}
+	}
+	if !hasWork {
+		return
+	}
+
+	logger.Infof("ProducerSync", "Resuming background enrichment for producers missing external URLs")
+
+	total := len(producers)
 	startTime := time.Now()
 	enriched := 0
 
-	for i, pd := range producersData {
-		var existing entities.Producer
-		if err := repositories.DB.Where("mal_id = ?", pd.MALID).First(&existing).Error; err == nil {
-			threeDaysAgo := time.Now().Add(-3 * 24 * time.Hour)
-			if existing.UpdatedAt.After(threeDaysAgo) && len(existing.ExternalURLs) > 0 {
-				continue
-			}
+	for i, p := range producers {
+		if p.EnrichedAt != nil && p.EnrichedAt.After(sevenDaysAgo) {
+			continue
 		}
 
-		detail, err := jikan.GetProducerByID(pd.MALID)
+		detail, err := jikan.GetProducerByID(p.MALID)
 		if err != nil {
-			logger.Warnf("ProducerSync", "Failed to fetch details for producer %d: %v", pd.MALID, err)
+			logger.Warnf("ProducerSync", "Failed to fetch details for producer %d: %v", p.MALID, err)
 			continue
 		}
 
-		if len(detail.Data.External) == 0 {
+		data := detail.Data
+		if err := repositories.UpdateProducerDetails(
+			p.ID, data.URL, data.Established, data.About, data.Favorites, data.Count,
+			data.Images.JPG.ImageURL,
+		); err != nil {
+			logger.Warnf("ProducerSync", "Failed to update details for producer %d: %v", p.MALID, err)
 			continue
 		}
 
-		var producer entities.Producer
-		if err := repositories.DB.Where("mal_id = ?", pd.MALID).First(&producer).Error; err != nil {
-			continue
-		}
-
-		externalURLs := make([]entities.ExternalURL, 0, len(detail.Data.External))
-		for _, ext := range detail.Data.External {
-			externalURLs = append(externalURLs, entities.ExternalURL{Name: ext.Name, URL: ext.URL})
-		}
-		if err := repositories.DB.Model(&producer).Association("ExternalURLs").Replace(externalURLs); err != nil {
-			logger.Warnf("ProducerSync", "Failed to update external URLs for producer %d: %v", pd.MALID, err)
-			continue
+		if len(data.External) > 0 {
+			externalURLs := make([]entities.ExternalURL, 0, len(data.External))
+			for _, ext := range data.External {
+				externalURLs = append(externalURLs, entities.ExternalURL{Name: ext.Name, URL: ext.URL})
+			}
+			if err := repositories.ReplaceProducerExternalURLs(&p, externalURLs); err != nil {
+				logger.Warnf("ProducerSync", "Failed to update external URLs for producer %d: %v", p.MALID, err)
+			}
 		}
 
 		enriched++

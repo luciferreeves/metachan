@@ -51,8 +51,6 @@ func GetAnime[T idType](maptype enums.MappingType, id T) (entities.Anime, error)
 		Preload("Episodes.StreamInfo").
 		Preload("Episodes.StreamInfo.SubSources").
 		Preload("Episodes.StreamInfo.DubSources").
-		Preload("Characters").
-		Preload("Characters.VoiceActors").
 		Preload("Schedule").
 		Preload("Seasons").
 		Preload("Seasons.Title").
@@ -69,7 +67,80 @@ func GetAnime[T idType](maptype enums.MappingType, id T) (entities.Anime, error)
 		return entities.Anime{}, errors.New("anime not found")
 	}
 
+	loadAnimeCharacters(&anime)
+
 	return anime, nil
+}
+
+func loadAnimeCharacters(anime *entities.Anime) {
+	var rows []struct {
+		CharacterID uint
+		Role        string
+	}
+	DB.Table("anime_characters").
+		Select("character_id, role").
+		Where("anime_id = ?", anime.ID).
+		Scan(&rows)
+
+	for _, row := range rows {
+		var char entities.Character
+		if err := DB.First(&char, row.CharacterID).Error; err != nil {
+			continue
+		}
+		DB.Preload("VoiceActor").
+			Where("character_id = ?", char.ID).
+			Find(&char.VoiceActors)
+		char.Role = row.Role
+		anime.Characters = append(anime.Characters, char)
+	}
+}
+
+func SaveAnimeCharacters(animeID uint, characters []entities.Character) error {
+	for i := range characters {
+		char := &characters[i]
+
+		DB.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "mal_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"url", "image_url", "name"}),
+		}).Create(char)
+		if char.ID == 0 {
+			DB.Where("mal_id = ?", char.MALID).First(char)
+		}
+
+		DB.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "anime_id"}, {Name: "character_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"role"}),
+		}).Create(&entities.AnimeCharacter{
+			AnimeID:     animeID,
+			CharacterID: char.ID,
+			Role:        char.Role,
+		})
+
+		for _, cva := range char.VoiceActors {
+			va := cva.VoiceActor
+			if va == nil {
+				continue
+			}
+
+			DB.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "mal_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"url", "image", "name"}),
+			}).Create(va)
+			if va.ID == 0 {
+				DB.Where("mal_id = ?", va.MALID).First(va)
+			}
+
+			DB.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "character_id"}, {Name: "voice_actor_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"language"}),
+			}).Create(&entities.CharacterVoiceActor{
+				CharacterID:  char.ID,
+				VoiceActorID: va.ID,
+				Language:     cva.Language,
+			})
+		}
+	}
+	return nil
 }
 
 func CreateOrUpdateAnime(anime *entities.Anime) error {
@@ -85,13 +156,36 @@ func CreateOrUpdateAnime(anime *entities.Anime) error {
 
 	result = DB.Session(&gorm.Session{FullSaveAssociations: true}).Clauses(clause.OnConflict{
 		UpdateAll: true,
-	}).Save(anime)
+	}).Omit("Characters", "Episodes").Save(anime)
 
 	if result.Error != nil {
 		return fmt.Errorf("failed to save anime: %w", result.Error)
 	}
 
 	logger.Infof("Anime", "Saved anime (MAL ID: %d) with %d episodes, %d characters", anime.MALID, len(anime.Episodes), len(anime.Characters))
+	return nil
+}
+
+func SaveAnimeEpisodes(animeID uint, episodes []entities.Episode) error {
+	for i := range episodes {
+		ep := &episodes[i]
+		ep.AnimeID = animeID
+
+		var existing entities.Episode
+		if DB.Where("episode_id = ?", ep.EpisodeID).First(&existing).Error == nil {
+			ep.ID = existing.ID
+			ep.TitleID = existing.TitleID
+			DB.Model(ep).Omit("SkipTimes", "StreamInfo", "Title").Updates(ep)
+			if ep.Title != nil && existing.TitleID != 0 {
+				ep.Title.ID = existing.TitleID
+				DB.Save(ep.Title)
+			}
+		} else {
+			DB.Session(&gorm.Session{FullSaveAssociations: true}).
+				Omit("SkipTimes", "StreamInfo").
+				Create(ep)
+		}
+	}
 	return nil
 }
 

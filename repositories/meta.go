@@ -72,6 +72,30 @@ func CreateOrUpdateSimpleTitle(title *entities.SimpleTitle) (uint, error) {
 	return title.ID, nil
 }
 
+func GetAllImagesMapped() (map[string]uint, error) {
+	var images []entities.SimpleImage
+	if err := DB.Select("id, image_url").Find(&images).Error; err != nil {
+		return nil, err
+	}
+	m := make(map[string]uint, len(images))
+	for _, img := range images {
+		m[img.ImageURL] = img.ID
+	}
+	return m, nil
+}
+
+func GetAllTitlesMapped() (map[string]uint, error) {
+	var titles []entities.SimpleTitle
+	if err := DB.Select("id, type, title").Find(&titles).Error; err != nil {
+		return nil, err
+	}
+	m := make(map[string]uint, len(titles))
+	for _, t := range titles {
+		m[t.Type+":"+t.Title] = t.ID
+	}
+	return m, nil
+}
+
 func CreateOrUpdateExternalURL(url *entities.ExternalURL) (uint, error) {
 	result := DB.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "name"}, {Name: "url"}},

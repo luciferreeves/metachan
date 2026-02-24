@@ -46,6 +46,6 @@ type Anime struct {
 	Studios        []Producer        `gorm:"many2many:anime_studios;" json:"studios,omitempty"`
 	Licensors      []Producer        `gorm:"many2many:anime_licensors;" json:"licensors,omitempty"`
 	Episodes       []Episode         `gorm:"foreignKey:AnimeID" json:"episodes,omitempty"`
-	Characters     []Character       `gorm:"foreignKey:AnimeID" json:"characters,omitempty"`
+	Characters     []Character       `gorm:"-" json:"characters,omitempty"`
 	Schedule       []EpisodeSchedule `gorm:"foreignKey:AnimeID;constraint:OnDelete:CASCADE" json:"airing_schedule,omitempty"`
 }

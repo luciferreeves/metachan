@@ -1,15 +1,15 @@
 package types
 
 type AniskipInterval struct {
-	StartTime float64 `json:"start_time"`
-	EndTime   float64 `json:"end_time"`
+	StartTime float64 `json:"startTime"`
+	EndTime   float64 `json:"endTime"`
 }
 
 type AniskipResult struct {
 	Interval      AniskipInterval `json:"interval"`
-	SkipType      string          `json:"skip_type"`
-	SkipID        string          `json:"skip_id"`
-	EpisodeLength float64         `json:"episode_length"`
+	SkipType      string          `json:"skipType"`
+	SkipID        string          `json:"skipId"`
+	EpisodeLength float64         `json:"episodeLength"`
 }
 
 type AniskipResponse struct {
