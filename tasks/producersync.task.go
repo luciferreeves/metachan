@@ -3,6 +3,7 @@ package tasks
 import (
 	"metachan/entities"
 	"metachan/repositories"
+	"metachan/types"
 	"metachan/utils/api/jikan"
 	"metachan/utils/logger"
 	"time"
@@ -20,78 +21,53 @@ func ProducerSync() error {
 	total := len(response.Data)
 	logger.Infof("ProducerSync", "Fetched %d producers from MAL", total)
 
-	startTime := time.Now()
-	const batchSize = 10
-	totalProcessed := 0
+	if err := saveProducerListData(response.Data); err != nil {
+		return err
+	}
+
+	logger.Successf("ProducerSync", "Saved basic data for %d producers, enriching external URLs in background", total)
+
+	go enrichProducersInBackground(response.Data)
+
+	return nil
+}
+
+func saveProducerListData(producersData []types.JikanSingleProducer) error {
+	total := len(producersData)
+	const batchSize = 50
 
 	for batchStart := 0; batchStart < total; batchStart += batchSize {
 		batchEnd := min(batchStart+batchSize, total)
-
-		batchData := response.Data[batchStart:batchEnd]
+		batch := producersData[batchStart:batchEnd]
 
 		type producerWithImage struct {
 			producer entities.Producer
 			imageURL string
 		}
 
-		producersData := make([]producerWithImage, 0, len(batchData))
+		producerItems := make([]producerWithImage, 0, len(batch))
 		imageMap := make(map[string]struct{})
 
-		for i, producerData := range batchData {
-			// Check if producer was updated within last 3 days - if so, skip detail fetch
-			var existingProducer entities.Producer
-			if err := repositories.DB.Where("mal_id = ?", producerData.MALID).First(&existingProducer).Error; err == nil {
-				// Producer exists, check if updated within last 3 days
-				threeDaysAgo := time.Now().Add(-3 * 24 * time.Hour)
-				if existingProducer.UpdatedAt.After(threeDaysAgo) {
-					logger.Debugf("ProducerSync", "Skipping producer %d (MAL ID: %d) - updated %v ago", i+1, producerData.MALID, time.Since(existingProducer.UpdatedAt).Round(time.Hour))
-					continue
-				}
-			}
-
-			producerDetail, err := jikan.GetProducerByID(producerData.MALID)
-			if err != nil {
-				logger.Warnf("ProducerSync", "Failed to fetch details for producer %d: %v", producerData.MALID, err)
-				continue
-			}
-
+		for _, pd := range batch {
 			producer := entities.Producer{
-				MALID:       producerDetail.Data.MALID,
-				URL:         producerDetail.Data.URL,
-				Favorites:   producerDetail.Data.Favorites,
-				Count:       producerDetail.Data.Count,
-				Established: producerDetail.Data.Established,
-				About:       producerDetail.Data.About,
+				MALID:       pd.MALID,
+				URL:         pd.URL,
+				Favorites:   pd.Favorites,
+				Count:       pd.Count,
+				Established: pd.Established,
+				About:       pd.About,
 			}
-
-			for _, title := range producerDetail.Data.Titles {
+			for _, t := range pd.Titles {
 				producer.Titles = append(producer.Titles, entities.SimpleTitle{
-					Type:  title.Type,
-					Title: title.Title,
+					Type:  t.Type,
+					Title: t.Title,
 				})
 			}
-
-			for _, ext := range producerDetail.Data.External {
-				producer.ExternalURLs = append(producer.ExternalURLs, entities.ExternalURL{
-					Name: ext.Name,
-					URL:  ext.URL,
-				})
-			}
-
-			imageURL := producerDetail.Data.Images.JPG.ImageURL
+			imageURL := pd.Images.JPG.ImageURL
 			if imageURL != "" {
 				imageMap[imageURL] = struct{}{}
 			}
-
-			producersData = append(producersData, producerWithImage{
-				producer: producer,
-				imageURL: imageURL,
-			})
-
-			if (batchStart+i+1)%10 == 0 || (batchStart+i+1) == total {
-				progress, eta := calculateProgress(batchStart+i+1, total, startTime)
-				logger.Infof("ProducerSync", "Fetched: %d/%d (%.1f%%) | ETA: %v", batchStart+i+1, total, progress, eta)
-			}
+			producerItems = append(producerItems, producerWithImage{producer: producer, imageURL: imageURL})
 		}
 
 		if len(imageMap) > 0 {
@@ -106,17 +82,16 @@ func ProducerSync() error {
 		}
 
 		titleMap := make(map[string]entities.SimpleTitle)
-		for _, pd := range producersData {
-			for _, title := range pd.producer.Titles {
-				key := title.Type + ":" + title.Title
-				titleMap[key] = title
+		for _, pd := range producerItems {
+			for _, t := range pd.producer.Titles {
+				key := t.Type + ":" + t.Title
+				titleMap[key] = t
 			}
 		}
-
 		if len(titleMap) > 0 {
 			titles := make([]entities.SimpleTitle, 0, len(titleMap))
-			for _, title := range titleMap {
-				titles = append(titles, title)
+			for _, t := range titleMap {
+				titles = append(titles, t)
 			}
 			if err := repositories.BatchCreateSimpleTitles(titles); err != nil {
 				logger.Errorf("ProducerSync", "Failed to batch insert titles: %v", err)
@@ -129,7 +104,6 @@ func ProducerSync() error {
 			logger.Errorf("ProducerSync", "Failed to query images: %v", err)
 			return err
 		}
-
 		imageIDMap := make(map[string]uint)
 		for _, img := range dbImages {
 			imageIDMap[img.ImageURL] = img.ID
@@ -140,28 +114,24 @@ func ProducerSync() error {
 			logger.Errorf("ProducerSync", "Failed to query titles: %v", err)
 			return err
 		}
-
 		titleIDMap := make(map[string]uint)
-		for _, title := range dbTitles {
-			key := title.Type + ":" + title.Title
-			titleIDMap[key] = title.ID
+		for _, t := range dbTitles {
+			titleIDMap[t.Type+":"+t.Title] = t.ID
 		}
 
-		producers := make([]entities.Producer, 0, len(producersData))
-		for _, pd := range producersData {
+		producers := make([]entities.Producer, 0, len(producerItems))
+		for _, pd := range producerItems {
 			if pd.imageURL != "" {
-				if id, exists := imageIDMap[pd.imageURL]; exists {
+				if id, ok := imageIDMap[pd.imageURL]; ok {
 					pd.producer.ImageID = &id
 				}
 			}
-
 			for i := range pd.producer.Titles {
 				key := pd.producer.Titles[i].Type + ":" + pd.producer.Titles[i].Title
-				if id, exists := titleIDMap[key]; exists {
+				if id, ok := titleIDMap[key]; ok {
 					pd.producer.Titles[i].ID = id
 				}
 			}
-
 			producers = append(producers, pd.producer)
 		}
 
@@ -170,11 +140,57 @@ func ProducerSync() error {
 				logger.Errorf("ProducerSync", "Failed to batch insert producers: %v", err)
 				return err
 			}
-			totalProcessed += len(producers)
-			logger.Infof("ProducerSync", "Committed batch: %d producers (Total: %d/%d)", len(producers), totalProcessed, total)
+			logger.Infof("ProducerSync", "Saved batch %d–%d of %d", batchStart+1, batchEnd, total)
 		}
 	}
 
-	logger.Successf("ProducerSync", "Producer sync completed. Total: %d producers", totalProcessed)
 	return nil
+}
+
+func enrichProducersInBackground(producersData []types.JikanSingleProducer) {
+	total := len(producersData)
+	startTime := time.Now()
+	enriched := 0
+
+	for i, pd := range producersData {
+		var existing entities.Producer
+		if err := repositories.DB.Where("mal_id = ?", pd.MALID).First(&existing).Error; err == nil {
+			threeDaysAgo := time.Now().Add(-3 * 24 * time.Hour)
+			if existing.UpdatedAt.After(threeDaysAgo) && len(existing.ExternalURLs) > 0 {
+				continue
+			}
+		}
+
+		detail, err := jikan.GetProducerByID(pd.MALID)
+		if err != nil {
+			logger.Warnf("ProducerSync", "Failed to fetch details for producer %d: %v", pd.MALID, err)
+			continue
+		}
+
+		if len(detail.Data.External) == 0 {
+			continue
+		}
+
+		var producer entities.Producer
+		if err := repositories.DB.Where("mal_id = ?", pd.MALID).First(&producer).Error; err != nil {
+			continue
+		}
+
+		externalURLs := make([]entities.ExternalURL, 0, len(detail.Data.External))
+		for _, ext := range detail.Data.External {
+			externalURLs = append(externalURLs, entities.ExternalURL{Name: ext.Name, URL: ext.URL})
+		}
+		if err := repositories.DB.Model(&producer).Association("ExternalURLs").Replace(externalURLs); err != nil {
+			logger.Warnf("ProducerSync", "Failed to update external URLs for producer %d: %v", pd.MALID, err)
+			continue
+		}
+
+		enriched++
+		if (i+1)%10 == 0 || (i+1) == total {
+			progress, eta := calculateProgress(i+1, total, startTime)
+			logger.Infof("ProducerSync", "Enriching: %d/%d (%.1f%%) | ETA: %v", i+1, total, progress, eta)
+		}
+	}
+
+	logger.Successf("ProducerSync", "Background enrichment complete. Enriched %d producers with external URLs", enriched)
 }

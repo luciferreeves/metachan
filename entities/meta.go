@@ -67,8 +67,8 @@ type ExternalURL struct {
 
 type SimpleTitle struct {
 	BaseModel
-	Type  string `gorm:"uniqueIndex:idx_simple_title" json:"type,omitempty"`
-	Title string `gorm:"uniqueIndex:idx_simple_title" json:"title,omitempty"`
+	Type  string `json:"type,omitempty"`
+	Title string `json:"title,omitempty"`
 }
 
 type SimpleImage struct {
