@@ -16,7 +16,13 @@ func Initialize(router *fiber.App) {
 	animeRouter.Get("/:id/episodes", controllers.GetAnimeEpisodes)
 	animeRouter.Get("/:id/episodes/:episodeId", controllers.GetAnimeEpisode)
 	animeRouter.Get("/:id/characters", controllers.GetAnimeCharacters)
-	animeRouter.Get("/:id/characters/:characterId", controllers.GetAnimeCharacter)
+	animeRouter.Get("/:id/people", controllers.GetAnimePeople)
+
+	characterRouter := router.Group("/character")
+	characterRouter.Get("/:characterId", controllers.GetAnimeCharacter)
+
+	peopleRouter := router.Group("/people")
+	peopleRouter.Get("/:personId", controllers.GetPerson)
 
 	// Anime routes
 	// animeRouter := router.Group("/a")

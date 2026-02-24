@@ -335,3 +335,22 @@ func GetCharacterByMALID(id int) (*types.JikanCharacterFullResponse, error) {
 	}
 	return &response, nil
 }
+
+func GetPersonByMALID(id int) (*types.JikanPersonFullResponse, error) {
+	url := fmt.Sprintf("%s/people/%d/full", jikanAPIBaseURL, id)
+	ctx, cancel := context.WithTimeout(context.Background(), contextTimeout)
+	defer cancel()
+
+	bytes, err := clientInstance.makeRequest(ctx, url)
+	if err != nil {
+		logger.Errorf("JikanClient", "GetPersonByMALID failed for ID %d: %v", id, err)
+		return nil, errors.New("failed to fetch person data from Jikan API")
+	}
+
+	var response types.JikanPersonFullResponse
+	if err := json.Unmarshal(bytes, &response); err != nil {
+		logger.Errorf("JikanClient", "Failed to unmarshal person response for ID %d: %v", id, err)
+		return nil, errors.New("failed to parse person data from Jikan API")
+	}
+	return &response, nil
+}

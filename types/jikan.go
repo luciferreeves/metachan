@@ -246,3 +246,40 @@ type JikanProducersResponse struct {
 type JikanSingleProducerResponse struct {
 	Data JikanSingleProducer `json:"data"`
 }
+
+type JikanPersonVoiceRole struct {
+	Role      string                    `json:"role"`
+	Anime     JikanCharacterSimpleAnime `json:"anime"`
+	Character JikanCharacterPerson      `json:"character"`
+}
+
+type JikanPersonAnimeCredit struct {
+	Position string                    `json:"position"`
+	Anime    JikanCharacterSimpleAnime `json:"anime"`
+}
+
+type JikanPersonMangaCredit struct {
+	Position string                    `json:"position"`
+	Manga    JikanCharacterSimpleAnime `json:"manga"`
+}
+
+type JikanFullPersonData struct {
+	MALID          int                      `json:"mal_id"`
+	URL            string                   `json:"url"`
+	WebsiteURL     *string                  `json:"website_url"`
+	Images         JikanGenericImageEntity  `json:"images"`
+	Name           string                   `json:"name"`
+	GivenName      string                   `json:"given_name"`
+	FamilyName     string                   `json:"family_name"`
+	AlternateNames []string                 `json:"alternate_names"`
+	Birthday       *string                  `json:"birthday"`
+	Favorites      int                      `json:"favorites"`
+	About          string                   `json:"about"`
+	Anime          []JikanPersonAnimeCredit `json:"anime"`
+	Manga          []JikanPersonMangaCredit `json:"manga"`
+	Voices         []JikanPersonVoiceRole   `json:"voices"`
+}
+
+type JikanPersonFullResponse struct {
+	Data JikanFullPersonData `json:"data"`
+}

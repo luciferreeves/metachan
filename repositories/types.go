@@ -27,3 +27,8 @@ type characterStub struct {
 	MALID      int
 	EnrichedAt *time.Time
 }
+
+type personStub struct {
+	MALID      int
+	EnrichedAt *time.Time
+}

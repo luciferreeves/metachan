@@ -18,7 +18,6 @@ func init() {
 		Mutex:   sync.Mutex{},
 	}
 
-	// Register ProducerSync task (every 7 days) - runs first to populate unified producer table
 	err := GlobalTaskManager.RegisterTask(types.Task{
 		Name:     "ProducerSync",
 		Interval: 7 * 24 * time.Hour,
@@ -30,7 +29,6 @@ func init() {
 		logger.Errorf("TaskManager", "Failed to register ProducerSync task: %v", err)
 	}
 
-	// Register GenreSync task (every 7 days)
 	err = GlobalTaskManager.RegisterTask(types.Task{
 		Name:     "GenreSync",
 		Interval: 7 * 24 * time.Hour,
@@ -41,8 +39,6 @@ func init() {
 		logger.Errorf("TaskManager", "Failed to register GenreSync task: %v", err)
 	}
 
-	// Register AniFetch task (weekly) - fetches anime mappings from Fribb list
-	// Depends on ProducerSync and GenreSync completing first
 	err = GlobalTaskManager.RegisterTask(types.Task{
 		Name:         "AnimeFetch",
 		Interval:     7 * 24 * time.Hour,
@@ -54,7 +50,6 @@ func init() {
 		logger.Errorf("TaskManager", "Failed to register AnimeFetch task: %v", err)
 	}
 
-	// Register AnimeSync task (runs after AnimeFetch completes) - only if enabled in config
 	if config.Sync.AniSync {
 		err = GlobalTaskManager.RegisterTask(types.Task{
 			Name:         "AnimeSync",
@@ -78,9 +73,19 @@ func init() {
 		if err != nil {
 			logger.Errorf("TaskManager", "Failed to register CharacterSync task: %v", err)
 		}
+
+		err = GlobalTaskManager.RegisterTask(types.Task{
+			Name:         "PersonSync",
+			Interval:     0,
+			Execute:      PersonSync,
+			OnResume:     ResumePersonEnrichment,
+			Dependencies: []string{"CharacterSync"},
+		})
+		if err != nil {
+			logger.Errorf("TaskManager", "Failed to register PersonSync task: %v", err)
+		}
 	}
 
-	// Register AnimeUpdate task (every 15 minutes)
 	err = GlobalTaskManager.RegisterTask(types.Task{
 		Name:     "AnimeUpdate",
 		Interval: 15 * time.Minute,

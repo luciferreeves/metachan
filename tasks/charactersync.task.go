@@ -53,12 +53,7 @@ func CharacterSync() error {
 		for _, v := range d.Voices {
 			voiceActors = append(voiceActors, entities.CharacterVoiceActor{
 				Language: v.Language,
-				VoiceActor: &entities.VoiceActor{
-					MALID: v.Person.MALID,
-					Name:  v.Person.Name,
-					URL:   v.Person.URL,
-					Image: v.Person.Images.JPG.ImageURL,
-				},
+				Person:   &entities.Person{},
 			})
 		}
 

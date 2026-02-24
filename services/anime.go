@@ -338,10 +338,7 @@ func applyJikanData(anime *entities.Anime, jikanAnime *types.JikanAnimeResponse,
 			for _, va := range jc.VoiceActors {
 				char.VoiceActors = append(char.VoiceActors, entities.CharacterVoiceActor{
 					Language: va.Language,
-					VoiceActor: &entities.VoiceActor{
-						MALID: va.Person.MALID,
-						Name:  va.Person.Name,
-						URL:   va.Person.URL,
+					Person: &entities.Person{
 						Image: va.Person.Images.JPG.ImageURL,
 					},
 				})
