@@ -14,6 +14,7 @@ import (
 	"metachan/utils/api/tmdb"
 	"metachan/utils/api/tvdb"
 	"metachan/utils/logger"
+	"strings"
 )
 
 func GetAnime(mapping *entities.Mapping) (*entities.Anime, error) {
@@ -112,6 +113,11 @@ func GetAnime(mapping *entities.Mapping) (*entities.Anime, error) {
 	}
 
 	applyStreamingData(anime)
+
+	if mapping.TVDB > 0 || mapping.TMDB > 0 {
+		logger.Infof("AnimeService", "Fetching related anime seasons")
+		applySeasonData(anime, mapping)
+	}
 
 	if err := saveAnime(anime, epSkipMap); err != nil {
 		logger.Errorf("AnimeService", "Failed to save anime to database: %v", err)
@@ -217,24 +223,36 @@ func applyJikanData(anime *entities.Anime, jikanAnime *types.JikanAnimeResponse,
 	}
 
 	for _, jp := range jikanAnime.Data.Producers {
-		anime.Producers = append(anime.Producers, entities.Producer{
+		producer := entities.Producer{
 			MALID: jp.MALID,
 			URL:   jp.URL,
-		})
+		}
+		if jp.Name != "" {
+			producer.Titles = []entities.SimpleTitle{{Title: jp.Name, Type: "Default"}}
+		}
+		anime.Producers = append(anime.Producers, producer)
 	}
 
 	for _, js := range jikanAnime.Data.Studios {
-		anime.Studios = append(anime.Studios, entities.Producer{
+		studio := entities.Producer{
 			MALID: js.MALID,
 			URL:   js.URL,
-		})
+		}
+		if js.Name != "" {
+			studio.Titles = []entities.SimpleTitle{{Title: js.Name, Type: "Default"}}
+		}
+		anime.Studios = append(anime.Studios, studio)
 	}
 
 	for _, jl := range jikanAnime.Data.Licensors {
-		anime.Licensors = append(anime.Licensors, entities.Producer{
+		licensor := entities.Producer{
 			MALID: jl.MALID,
 			URL:   jl.URL,
-		})
+		}
+		if jl.Name != "" {
+			licensor.Titles = []entities.SimpleTitle{{Title: jl.Name, Type: "Default"}}
+		}
+		anime.Licensors = append(anime.Licensors, licensor)
 	}
 
 	anime.TotalEpisodes = jikanAnime.Data.Episodes
@@ -243,6 +261,7 @@ func applyJikanData(anime *entities.Anime, jikanAnime *types.JikanAnimeResponse,
 	for _, je := range jikanEpisodes.Data {
 		episode := entities.Episode{
 			EpisodeNumber: je.MALID,
+			URL:           je.URL,
 			Aired:         je.Aired,
 			Score:         je.Score,
 			Filler:        je.Filler,
@@ -329,21 +348,72 @@ func applyMALsyncData(anime *entities.Anime, malSyncData *types.MalsyncAnimeResp
 		return
 	}
 
-	if anime.Logos == nil {
-		anime.Logos = &entities.Logos{}
+	logos := extractLogosFromMALSync(malSyncData)
+	if logos != nil {
+		anime.Logos = logos
+	}
+}
+
+func extractLogosFromMALSync(malSyncData *types.MalsyncAnimeResponse) *entities.Logos {
+	if malSyncData == nil {
+		return nil
 	}
 
-	for _, site := range malSyncData.Sites {
-		for _, entry := range site {
-			if entry.Image != "" {
-				anime.Logos.Original = entry.Image
-				break
-			}
-		}
-		if anime.Logos.Original != "" {
-			break
+	crunchyrollSites, exists := malSyncData.Sites["Crunchyroll"]
+	if !exists || len(crunchyrollSites) == 0 {
+		logger.Debugf("AnimeService", "No Crunchyroll data found in MALSync response")
+		return nil
+	}
+
+	crURL := ""
+	for _, site := range crunchyrollSites {
+		crURL = site.URL
+		break
+	}
+
+	if crURL == "" {
+		logger.Debugf("AnimeService", "No valid Crunchyroll URL found")
+		return nil
+	}
+
+	seriesID := extractCrunchyrollSeriesID(crURL)
+	if seriesID == "" {
+		return nil
+	}
+
+	logoSizes := map[string]int{
+		"Small":    320,
+		"Medium":   480,
+		"Large":    600,
+		"XLarge":   800,
+		"Original": 1200,
+	}
+
+	logos := &entities.Logos{
+		Small:    fmt.Sprintf("https://imgsrv.crunchyroll.com/cdn-cgi/image/fit=contain,format=auto,quality=85,width=%d/keyart/%s-title_logo-en-us", logoSizes["Small"], seriesID),
+		Medium:   fmt.Sprintf("https://imgsrv.crunchyroll.com/cdn-cgi/image/fit=contain,format=auto,quality=85,width=%d/keyart/%s-title_logo-en-us", logoSizes["Medium"], seriesID),
+		Large:    fmt.Sprintf("https://imgsrv.crunchyroll.com/cdn-cgi/image/fit=contain,format=auto,quality=85,width=%d/keyart/%s-title_logo-en-us", logoSizes["Large"], seriesID),
+		XLarge:   fmt.Sprintf("https://imgsrv.crunchyroll.com/cdn-cgi/image/fit=contain,format=auto,quality=85,width=%d/keyart/%s-title_logo-en-us", logoSizes["XLarge"], seriesID),
+		Original: fmt.Sprintf("https://imgsrv.crunchyroll.com/cdn-cgi/image/fit=contain,format=auto,quality=85,width=%d/keyart/%s-title_logo-en-us", logoSizes["Original"], seriesID),
+	}
+
+	return logos
+}
+
+func extractCrunchyrollSeriesID(crURL string) string {
+	if crURL == "" {
+		return ""
+	}
+
+	parts := strings.Split(crURL, "/")
+	for i, part := range parts {
+		if part == "series" && i+1 < len(parts) {
+			return parts[i+1]
 		}
 	}
+
+	logger.Debugf("AnimeService", "Could not extract series ID from URL: %s", crURL)
+	return ""
 }
 
 func applyAniskipData(episode *entities.Episode, skipData []types.AniskipResult) []entities.EpisodeSkipTime {
@@ -398,6 +468,173 @@ func applyStreamingData(anime *entities.Anime) {
 	logger.Infof("AnimeService", "Streaming counts - Subbed: %d, Dubbed: %d", subCount, dubCount)
 }
 
+func applySeasonData(anime *entities.Anime, mapping *entities.Mapping) {
+	var relatedMappings []entities.Mapping
+	malIDSet := make(map[int]bool)
+
+	if mapping.TVDB > 0 {
+		tvdbMappings, err := repositories.GetRelatedAnimeByTVDB(mapping.TVDB, mapping.MAL)
+		if err == nil && len(tvdbMappings) > 0 {
+			logger.Infof("AnimeService", "Found %d related anime via TVDB", len(tvdbMappings))
+			for _, m := range tvdbMappings {
+				if !malIDSet[m.MAL] {
+					malIDSet[m.MAL] = true
+					relatedMappings = append(relatedMappings, m)
+				}
+			}
+		}
+	}
+
+	if mapping.TMDB > 0 {
+		tmdbMappings, err := repositories.GetRelatedAnimeByTMDB(mapping.TMDB, mapping.MAL)
+		if err == nil && len(tmdbMappings) > 0 {
+			logger.Infof("AnimeService", "Found %d related anime via TMDB", len(tmdbMappings))
+			for _, m := range tmdbMappings {
+				if !malIDSet[m.MAL] {
+					malIDSet[m.MAL] = true
+					relatedMappings = append(relatedMappings, m)
+				}
+			}
+		}
+	}
+
+	if len(relatedMappings) == 0 {
+		logger.Debugf("AnimeService", "No related anime seasons found")
+		anime.SeasonNumber = 1
+		return
+	}
+
+	logger.Infof("AnimeService", "Fetching details for %d season(s)", len(relatedMappings))
+
+	allSeasons := []seasonInfo{{
+		malID:       anime.MALID,
+		year:        anime.Year,
+		seasonOrder: getSeasonOrder(anime.Season),
+		isCurrent:   true,
+	}}
+
+	for _, relatedMapping := range relatedMappings {
+		seasonAnime, err := jikan.GetAnimeByMALID(relatedMapping.MAL)
+		if err != nil {
+			logger.Warnf("AnimeService", "Failed to fetch season data for MAL ID %d: %v", relatedMapping.MAL, err)
+			continue
+		}
+
+		allSeasons = append(allSeasons, seasonInfo{
+			malID:       relatedMapping.MAL,
+			year:        seasonAnime.Data.Year,
+			seasonOrder: getSeasonOrder(seasonAnime.Data.Season),
+			isCurrent:   false,
+		})
+
+		season := entities.Season{
+			MALID:    relatedMapping.MAL,
+			Synopsis: seasonAnime.Data.Synopsis,
+			Type:     seasonAnime.Data.Type,
+			Source:   seasonAnime.Data.Source,
+			Airing:   seasonAnime.Data.Airing,
+			Status:   seasonAnime.Data.Status,
+			Duration: seasonAnime.Data.Duration,
+			Season:   seasonAnime.Data.Season,
+			Year:     seasonAnime.Data.Year,
+		}
+
+		if seasonAnime.Data.Title != "" || seasonAnime.Data.TitleEnglish != "" || seasonAnime.Data.TitleJapanese != "" {
+			season.Title = &entities.Title{
+				Romaji:   seasonAnime.Data.Title,
+				English:  seasonAnime.Data.TitleEnglish,
+				Japanese: seasonAnime.Data.TitleJapanese,
+				Synonyms: seasonAnime.Data.TitleSynonyms,
+			}
+		}
+
+		if seasonAnime.Data.Images.JPG.ImageURL != "" {
+			season.Images = &entities.Images{
+				Small:    seasonAnime.Data.Images.JPG.SmallImageURL,
+				Large:    seasonAnime.Data.Images.JPG.LargeImageURL,
+				Original: seasonAnime.Data.Images.JPG.ImageURL,
+			}
+		}
+
+		season.Scores = &entities.Scores{
+			Score:      seasonAnime.Data.Score,
+			ScoredBy:   seasonAnime.Data.ScoredBy,
+			Rank:       seasonAnime.Data.Rank,
+			Popularity: seasonAnime.Data.Popularity,
+			Members:    seasonAnime.Data.Members,
+			Favorites:  seasonAnime.Data.Favorites,
+		}
+
+		if seasonAnime.Data.Aired.From != "" || seasonAnime.Data.Aired.To != "" {
+			season.AiringStatus = &entities.AiringStatus{
+				String: seasonAnime.Data.Aired.String,
+			}
+			if seasonAnime.Data.Aired.Prop.From.Year > 0 {
+				season.AiringStatus.From = &entities.Date{
+					Day:    seasonAnime.Data.Aired.Prop.From.Day,
+					Month:  seasonAnime.Data.Aired.Prop.From.Month,
+					Year:   seasonAnime.Data.Aired.Prop.From.Year,
+					String: seasonAnime.Data.Aired.From,
+				}
+			}
+			if seasonAnime.Data.Aired.Prop.To.Year > 0 {
+				season.AiringStatus.To = &entities.Date{
+					Day:    seasonAnime.Data.Aired.Prop.To.Day,
+					Month:  seasonAnime.Data.Aired.Prop.To.Month,
+					Year:   seasonAnime.Data.Aired.Prop.To.Year,
+					String: seasonAnime.Data.Aired.To,
+				}
+			}
+		}
+
+		anime.Seasons = append(anime.Seasons, season)
+	}
+
+	sortSeasonsByChronology(allSeasons)
+
+	seasonNumberMap := make(map[int]int)
+	for i, s := range allSeasons {
+		seasonNumberMap[s.malID] = i + 1
+		if s.isCurrent {
+			anime.SeasonNumber = i + 1
+		}
+	}
+
+	for i := range anime.Seasons {
+		anime.Seasons[i].SeasonNumber = seasonNumberMap[anime.Seasons[i].MALID]
+	}
+
+	logger.Successf("AnimeService", "Successfully fetched %d season(s), current anime is season %d", len(anime.Seasons), anime.SeasonNumber)
+}
+
+func getSeasonOrder(season string) int {
+	switch strings.ToLower(season) {
+	case "winter":
+		return 1
+	case "spring":
+		return 2
+	case "summer":
+		return 3
+	case "fall", "autumn":
+		return 4
+	default:
+		return 0
+	}
+}
+
+func sortSeasonsByChronology(seasons []seasonInfo) {
+	for i := 0; i < len(seasons)-1; i++ {
+		for j := 0; j < len(seasons)-i-1; j++ {
+			s1, s2 := seasons[j], seasons[j+1]
+
+			if s1.year > s2.year {
+				seasons[j], seasons[j+1] = seasons[j+1], seasons[j]
+			} else if s1.year == s2.year && s1.seasonOrder > s2.seasonOrder {
+				seasons[j], seasons[j+1] = seasons[j+1], seasons[j]
+			}
+		}
+	}
+}
 func saveAnime(anime *entities.Anime, skipTimeMap map[string][]entities.EpisodeSkipTime) error {
 	if anime.Mapping != nil {
 		if err := repositories.CreateOrUpdateMapping(anime.Mapping); err != nil {

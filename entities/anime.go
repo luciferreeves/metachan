@@ -29,7 +29,7 @@ type Anime struct {
 	DubbedCount    int               `json:"dubbed_count,omitempty"`
 	TotalEpisodes  int               `json:"total_episodes,omitempty"`
 	AiredEpisodes  int               `json:"aired_episodes,omitempty"`
-	LastUpdated    time.Time         `json:"last_updated,omitempty"`
+	LastUpdated    time.Time         `json:"-"`
 	Title          *Title            `gorm:"foreignKey:TitleID" json:"titles,omitempty"`
 	Mapping        *Mapping          `gorm:"foreignKey:MappingID" json:"mappings,omitempty"`
 	Images         *Images           `gorm:"foreignKey:ImagesID" json:"images,omitempty"`
@@ -40,6 +40,7 @@ type Anime struct {
 	Broadcast      *Broadcast        `gorm:"foreignKey:BroadcastID" json:"broadcast,omitempty"`
 	NextAiring     *NextEpisode      `gorm:"foreignKey:NextAiringID" json:"next_airing_episode,omitempty"`
 	Genres         []Genre           `gorm:"many2many:anime_genres;" json:"genres,omitempty"`
+	SeasonNumber   int               `json:"season_number,omitempty"`
 	Seasons        []Season          `gorm:"foreignKey:ParentAnimeID" json:"seasons,omitempty"`
 	Producers      []Producer        `gorm:"many2many:anime_producers;" json:"producers,omitempty"`
 	Studios        []Producer        `gorm:"many2many:anime_studios;" json:"studios,omitempty"`

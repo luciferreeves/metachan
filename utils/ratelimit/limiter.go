@@ -1,18 +1,8 @@
 package ratelimit
 
 import (
-	"sync"
 	"time"
 )
-
-type RateLimiter struct {
-	mu           sync.Mutex
-	lastRequest  time.Time
-	lastRequests []time.Time
-	maxRequests  int
-	window       time.Duration
-	minDelay     time.Duration
-}
 
 func NewRateLimiter(maxRequests int, window time.Duration) *RateLimiter {
 	minDelay := window / time.Duration(maxRequests)
@@ -89,10 +79,6 @@ func (r *RateLimiter) RemainingRequests() int {
 	}
 
 	return r.maxRequests - len(r.lastRequests)
-}
-
-type MultiLimiter struct {
-	limiters []*RateLimiter
 }
 
 func NewMultiLimiter(limiters ...*RateLimiter) *MultiLimiter {

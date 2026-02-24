@@ -18,6 +18,7 @@ type Season struct {
 	Year           int           `json:"year,omitempty"`
 	Current        bool          `json:"current,omitempty"`
 	Title          *Title        `gorm:"foreignKey:TitleID" json:"titles,omitempty"`
+	SeasonNumber   int           `json:"season_number,omitempty"`
 	Images         *Images       `gorm:"foreignKey:ImagesID" json:"images,omitempty"`
 	Scores         *Scores       `gorm:"foreignKey:ScoresID" json:"scores,omitempty"`
 	AiringStatus   *AiringStatus `gorm:"foreignKey:AiringStatusID" json:"airing_status,omitempty"`

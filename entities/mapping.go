@@ -20,5 +20,5 @@ type Mapping struct {
 	TMDB                int                    `json:"tmdb,omitempty"`
 	TVDB                int                    `json:"tvdb,omitempty"`
 	Type                enums.MappingAnimeType `json:"type,omitempty"`
-	MALAnilistComposite *string                `gorm:"uniqueIndex"`
+	MALAnilistComposite *string                `gorm:"uniqueIndex" json:"-"`
 }

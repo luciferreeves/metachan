@@ -4,12 +4,6 @@ import (
 	"sync"
 )
 
-// ParallelResult represents a result or error from a parallel computation
-type ParallelResult[T any] struct {
-	Value T
-	Error error
-}
-
 // Parallel executes multiple functions concurrently and returns their results
 // This is a powerful utility that allows us to fetch data from multiple APIs in parallel
 func Parallel[T any](funcs ...func() (T, error)) []ParallelResult[T] {
@@ -30,12 +24,6 @@ func Parallel[T any](funcs ...func() (T, error)) []ParallelResult[T] {
 
 	wg.Wait()
 	return results
-}
-
-// ParallelMapResult represents a result from a map operation that may contain an error
-type ParallelMapResult[T any] struct {
-	Value T
-	Error error
 }
 
 // ParallelMap applies a function to each item in a slice concurrently

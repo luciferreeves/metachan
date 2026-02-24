@@ -24,6 +24,7 @@ func GetAnime[T idType](maptype enums.MappingType, id T) (entities.Anime, error)
 		Preload("Mapping").
 		Preload("Title").
 		Preload("Images").
+		Preload("Covers").
 		Preload("Logos").
 		Preload("Scores").
 		Preload("AiringStatus").
@@ -47,6 +48,9 @@ func GetAnime[T idType](maptype enums.MappingType, id T) (entities.Anime, error)
 		Preload("Episodes").
 		Preload("Episodes.Title").
 		Preload("Episodes.SkipTimes").
+		Preload("Episodes.StreamInfo").
+		Preload("Episodes.StreamInfo.SubSources").
+		Preload("Episodes.StreamInfo.DubSources").
 		Preload("Characters").
 		Preload("Characters.VoiceActors").
 		Preload("Schedule").
