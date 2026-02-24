@@ -138,7 +138,7 @@ func updateAnime(series entities.Anime, reason string) {
 		return
 	}
 
-	updatedAnime, err := services.GetAnime(&mapping)
+	updatedAnime, err := services.ForceRefreshAnime(&mapping)
 	if err != nil {
 		logger.Errorf("AnimeUpdate", "Error getting updated anime data for %s (MAL ID: %d): %v", title, series.MALID, err)
 		return

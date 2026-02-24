@@ -1,6 +1,7 @@
 package tasks
 
 import (
+	"metachan/entities"
 	"metachan/enums"
 	"metachan/repositories"
 	"metachan/services"
@@ -66,4 +67,56 @@ func AniSync() error {
 	}
 
 	return nil
+}
+
+// ResumeAnimeSync is called on startup to resume any interrupted sync and refresh stale entries.
+func ResumeAnimeSync() {
+	go func() {
+		mappings, err := repositories.GetAllMappings()
+		if err != nil {
+			logger.Errorf("AniSync", "Resume: failed to fetch mappings: %v", err)
+			return
+		}
+
+		stubs, err := repositories.GetAllAnimeStubs()
+		if err != nil {
+			logger.Errorf("AniSync", "Resume: failed to fetch anime stubs: %v", err)
+			return
+		}
+
+		sevenDaysAgo := time.Now().Add(-7 * 24 * time.Hour)
+		updatedAt := make(map[int]time.Time, len(stubs))
+		for _, s := range stubs {
+			updatedAt[s.MALID] = s.UpdatedAt
+		}
+
+		var toProcess []entities.Mapping
+		for _, m := range mappings {
+			if m.MAL == 0 {
+				continue
+			}
+			t, exists := updatedAt[m.MAL]
+			if !exists || t.Before(sevenDaysAgo) {
+				toProcess = append(toProcess, m)
+			}
+		}
+
+		if len(toProcess) == 0 {
+			return
+		}
+
+		logger.Infof("AniSync", "Resume: %d anime to sync (missing or stale)", len(toProcess))
+		startTime := time.Now()
+
+		for i, m := range toProcess {
+			progress, eta := calculateProgress(i+1, len(toProcess), startTime)
+			logger.Infof("AniSync", "[Resume %d/%d] MAL ID %d - %.1f%% | ETA: %v", i+1, len(toProcess), m.MAL, progress, eta)
+
+			if _, err := services.GetAnime(&m); err != nil {
+				logger.Warnf("AniSync", "Resume: failed to sync MAL ID %d: %v", m.MAL, err)
+			}
+		}
+
+		logger.Successf("AniSync", "Resume complete: synced %d anime", len(toProcess))
+	}()
 }

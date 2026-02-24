@@ -206,6 +206,14 @@ func SaveEpisodeSkipTimes(episodeID string, skipTimes []entities.EpisodeSkipTime
 	return nil
 }
 
+func GetAllAnimeStubs() ([]animeStub, error) {
+	var stubs []animeStub
+	if err := DB.Model(&entities.Anime{}).Select("mal_id, updated_at").Scan(&stubs).Error; err != nil {
+		return nil, err
+	}
+	return stubs, nil
+}
+
 func GetAiringAnime() ([]entities.Anime, error) {
 	var anime []entities.Anime
 

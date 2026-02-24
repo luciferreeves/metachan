@@ -58,8 +58,9 @@ func init() {
 	if config.Sync.AniSync {
 		err = GlobalTaskManager.RegisterTask(types.Task{
 			Name:         "AnimeSync",
-			Interval:     0, // Manual-only - waits for AnimeFetch dependency
+			Interval:     0,
 			Execute:      AniSync,
+			OnResume:     ResumeAnimeSync,
 			Dependencies: []string{"AnimeFetch"},
 		})
 

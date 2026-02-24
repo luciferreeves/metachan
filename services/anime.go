@@ -15,6 +15,7 @@ import (
 	"metachan/utils/api/tvdb"
 	"metachan/utils/logger"
 	"strings"
+	"time"
 )
 
 func GetAnime(mapping *entities.Mapping) (*entities.Anime, error) {
@@ -26,13 +27,42 @@ func GetAnime(mapping *entities.Mapping) (*entities.Anime, error) {
 	malID := mapping.MAL
 	logger.Infof("AnimeService", "Fetching anime data for MAL ID: %d", malID)
 
-	var anime *entities.Anime
 	existingAnime, err := repositories.GetAnime(enums.MAL, malID)
 	if err == nil {
-		logger.Infof("AnimeService", "Found existing anime in database, will update with fresh data")
-		anime = &existingAnime
+		if time.Since(existingAnime.UpdatedAt) < 7*24*time.Hour {
+			logger.Infof("AnimeService", "Returning cached anime (MAL ID: %d, age: %v)", malID, time.Since(existingAnime.UpdatedAt).Round(time.Second))
+			return &existingAnime, nil
+		}
+		logger.Infof("AnimeService", "Cached anime is stale, refreshing (MAL ID: %d)", malID)
+		return fetchAnime(mapping, &existingAnime)
+	}
+
+	logger.Infof("AnimeService", "Anime not found in database, creating new")
+	return fetchAnime(mapping, nil)
+}
+
+func ForceRefreshAnime(mapping *entities.Mapping) (*entities.Anime, error) {
+	if mapping == nil {
+		logger.Errorf("AnimeService", "Mapping is nil")
+		return nil, fmt.Errorf("mapping is nil")
+	}
+
+	logger.Infof("AnimeService", "Force refreshing anime data for MAL ID: %d", mapping.MAL)
+
+	existingAnime, err := repositories.GetAnime(enums.MAL, mapping.MAL)
+	if err == nil {
+		return fetchAnime(mapping, &existingAnime)
+	}
+	return fetchAnime(mapping, nil)
+}
+
+func fetchAnime(mapping *entities.Mapping, existing *entities.Anime) (*entities.Anime, error) {
+	malID := mapping.MAL
+
+	var anime *entities.Anime
+	if existing != nil {
+		anime = existing
 	} else {
-		logger.Infof("AnimeService", "Anime not found in database, creating new")
 		anime = &entities.Anime{
 			MALID:   malID,
 			Mapping: mapping,
@@ -55,6 +85,15 @@ func GetAnime(mapping *entities.Mapping) (*entities.Anime, error) {
 	if err != nil {
 		logger.Warnf("AnimeService", "Failed to fetch characters from Jikan: %v", err)
 	}
+
+	// Reset all slice fields so re-fetching doesn't double-append onto existing DB data
+	anime.Episodes = nil
+	anime.Characters = nil
+	anime.Genres = nil
+	anime.Producers = nil
+	anime.Studios = nil
+	anime.Licensors = nil
+	anime.Schedule = nil
 
 	applyJikanData(anime, jikanAnime, jikanEpisodes, jikanCharacters)
 
