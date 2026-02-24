@@ -63,7 +63,7 @@ func (c *client) handleRetry(retries *int, url string, reason string, retryAfter
 		backoffDuration = retryAfter
 	}
 
-	logger.Warnf("JikanClient", "%s for %s (attempt %d/%d)", reason, url, *retries, c.maxRetries)
+	logger.Debugf("JikanClient", "%s for %s (attempt %d/%d)", reason, url, *retries, c.maxRetries)
 	time.Sleep(backoffDuration)
 	return true
 }
@@ -288,7 +288,7 @@ func GetAnimeProducers() (*types.JikanProducersResponse, error) {
 			response.Pagination = pageResponse.Pagination
 		}
 
-		logger.Debugf("JikanClient", "Fetched page (%d/%d) - %d producers", page, response.Pagination.LastVisiblePage, len(pageResponse.Data))
+		logger.Infof("JikanClient", "Fetched page (%d/%d) - %d producers", page, response.Pagination.LastVisiblePage, len(pageResponse.Data))
 
 		response.Data = append(response.Data, pageResponse.Data...)
 		hasNextPage = pageResponse.Pagination.HasNextPage

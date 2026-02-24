@@ -2,18 +2,14 @@ package ratelimit
 
 import (
 	"sync"
-	"time"
 )
 
 type RateLimiter struct {
-	mu           sync.Mutex
-	lastRequest  time.Time
-	lastRequests []time.Time
-	maxRequests  int
-	window       time.Duration
-	minDelay     time.Duration
+	tokens chan struct{}
+	done   chan struct{}
 }
 
 type MultiLimiter struct {
+	mu       sync.Mutex
 	limiters []*RateLimiter
 }

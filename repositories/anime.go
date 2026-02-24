@@ -63,6 +63,9 @@ func GetAnime[T idType](maptype enums.MappingType, id T) (entities.Anime, error)
 		First(&anime)
 
 	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return entities.Anime{}, result.Error
+		}
 		logger.Errorf("Anime", "Failed to get anime details: %v", result.Error)
 		return entities.Anime{}, errors.New("anime not found")
 	}

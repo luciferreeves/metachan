@@ -86,7 +86,6 @@ func fetchAnime(mapping *entities.Mapping, existing *entities.Anime) (*entities.
 		logger.Warnf("AnimeService", "Failed to fetch characters from Jikan: %v", err)
 	}
 
-	// Reset all slice fields so re-fetching doesn't double-append onto existing DB data
 	anime.Episodes = nil
 	anime.Characters = nil
 	anime.Genres = nil

@@ -5,80 +5,40 @@ import (
 )
 
 func NewRateLimiter(maxRequests int, window time.Duration) *RateLimiter {
-	minDelay := window / time.Duration(maxRequests)
-	return &RateLimiter{
-		lastRequests: make([]time.Time, 0, maxRequests),
-		maxRequests:  maxRequests,
-		window:       window,
-		minDelay:     minDelay,
+	interval := window / time.Duration(maxRequests)
+	rl := &RateLimiter{
+		tokens: make(chan struct{}, maxRequests),
+		done:   make(chan struct{}),
 	}
+	rl.tokens <- struct{}{}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				select {
+				case rl.tokens <- struct{}{}:
+				default:
+				}
+			case <-rl.done:
+				return
+			}
+		}
+	}()
+	return rl
 }
 
 func (r *RateLimiter) Wait() {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	<-r.tokens
+}
 
-	now := time.Now()
-
-	if !r.lastRequest.IsZero() {
-		elapsed := now.Sub(r.lastRequest)
-		if elapsed < r.minDelay {
-			waitTime := r.minDelay - elapsed
-			r.mu.Unlock()
-			time.Sleep(waitTime)
-			r.mu.Lock()
-			now = time.Now()
-		}
-	}
-
-	cutoff := now.Add(-r.window)
-	i := 0
-	for i < len(r.lastRequests) && r.lastRequests[i].Before(cutoff) {
-		i++
-	}
-	if i > 0 {
-		r.lastRequests = r.lastRequests[i:]
-	}
-
-	if len(r.lastRequests) >= r.maxRequests {
-		oldestInWindow := r.lastRequests[0]
-		waitDuration := r.window - now.Sub(oldestInWindow)
-
-		r.mu.Unlock()
-		time.Sleep(waitDuration + time.Millisecond)
-		r.mu.Lock()
-
-		now = time.Now()
-		cutoff = now.Add(-r.window)
-		i = 0
-		for i < len(r.lastRequests) && r.lastRequests[i].Before(cutoff) {
-			i++
-		}
-		if i > 0 {
-			r.lastRequests = r.lastRequests[i:]
-		}
-	}
-
-	r.lastRequest = now
-	r.lastRequests = append(r.lastRequests, now)
+func (r *RateLimiter) Stop() {
+	close(r.done)
 }
 
 func (r *RateLimiter) RemainingRequests() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	now := time.Now()
-	cutoff := now.Add(-r.window)
-
-	i := 0
-	for i < len(r.lastRequests) && r.lastRequests[i].Before(cutoff) {
-		i++
-	}
-	if i > 0 {
-		r.lastRequests = r.lastRequests[i:]
-	}
-
-	return r.maxRequests - len(r.lastRequests)
+	return len(r.tokens)
 }
 
 func NewMultiLimiter(limiters ...*RateLimiter) *MultiLimiter {
@@ -88,6 +48,8 @@ func NewMultiLimiter(limiters ...*RateLimiter) *MultiLimiter {
 }
 
 func (m *MultiLimiter) Wait() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for _, limiter := range m.limiters {
 		limiter.Wait()
 	}
