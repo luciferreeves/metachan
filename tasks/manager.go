@@ -104,7 +104,6 @@ func (tm *TaskManager) StartTask(taskName string) {
 				tm.logTaskExecution(taskName, "error", err.Error())
 				logger.Errorf("TaskManager", "Task %s execution failed: %v", taskName, err)
 			} else {
-				task.LastRun = time.Now()
 				tm.logTaskExecution(taskName, "success", "Task executed successfully")
 				repositories.SetTaskStatus(&entities.TaskStatus{
 					TaskName:    taskName,
@@ -134,7 +133,6 @@ func (tm *TaskManager) StartTask(taskName string) {
 					tm.logTaskExecution(taskName, "error", err.Error())
 					logger.Errorf("TaskManager", "Task %s execution failed: %v", taskName, err)
 				} else {
-					task.LastRun = time.Now()
 					tm.logTaskExecution(taskName, "success", "Task executed successfully")
 					repositories.SetTaskStatus(&entities.TaskStatus{
 						TaskName:    taskName,
@@ -168,7 +166,6 @@ func (tm *TaskManager) StartTask(taskName string) {
 					tm.logTaskExecution(taskName, "error", err.Error())
 					logger.Errorf("TaskManager", "Task %s execution failed: %v", taskName, err)
 				} else {
-					task.LastRun = time.Now()
 					tm.logTaskExecution(taskName, "success", "Task executed successfully")
 					repositories.SetTaskStatus(&entities.TaskStatus{
 						TaskName:    taskName,
@@ -246,46 +243,42 @@ func (tm *TaskManager) checkDependencies(task types.Task) bool {
 
 func (tm *TaskManager) triggerDependentTasks(completedTaskName string) {
 	tm.Mutex.Lock()
-	defer tm.Mutex.Unlock()
-
-	for taskName, task := range tm.Tasks {
-		hasDependency := false
-		for _, dep := range task.Dependencies {
+	type dependentTask struct {
+		taskName       string
+		taskDefinition types.Task
+	}
+	var dependentTasks []dependentTask
+	for registeredName, registeredTask := range tm.Tasks {
+		for _, dep := range registeredTask.Dependencies {
 			if dep == completedTaskName {
-				hasDependency = true
+				dependentTasks = append(dependentTasks, dependentTask{taskName: registeredName, taskDefinition: registeredTask})
 				break
 			}
 		}
+	}
+	tm.Mutex.Unlock()
 
-		if !hasDependency {
+	for _, dependent := range dependentTasks {
+		if !tm.checkDependencies(dependent.taskDefinition) {
 			continue
 		}
 
-		tm.Mutex.Unlock()
-		allDependenciesMet := tm.checkDependencies(task)
-		tm.Mutex.Lock()
-
-		if allDependenciesMet {
-			logger.Infof("TaskManager", "All dependencies met for %s, triggering execution", taskName)
-			go func(name string, t types.Task) {
-				if err := t.Execute(); err != nil {
-					tm.logTaskExecution(name, "error", err.Error())
-					logger.Errorf("TaskManager", "Task %s execution failed: %v", name, err)
-				} else {
-					tm.Mutex.Lock()
-					t.LastRun = time.Now()
-					tm.Mutex.Unlock()
-					tm.logTaskExecution(name, "success", "Task executed successfully")
-					repositories.SetTaskStatus(&entities.TaskStatus{
-						TaskName:    name,
-						IsCompleted: true,
-						LastRunAt:   time.Now(),
-					})
-					logger.Successf("TaskManager", "Task %s executed successfully", name)
-					tm.triggerDependentTasks(name)
-				}
-			}(taskName, task)
-		}
+		logger.Infof("TaskManager", "All dependencies met for %s, triggering execution", dependent.taskName)
+		go func(name string, task types.Task) {
+			if err := task.Execute(); err != nil {
+				tm.logTaskExecution(name, "error", err.Error())
+				logger.Errorf("TaskManager", "Task %s execution failed: %v", name, err)
+			} else {
+				tm.logTaskExecution(name, "success", "Task executed successfully")
+				repositories.SetTaskStatus(&entities.TaskStatus{
+					TaskName:    name,
+					IsCompleted: true,
+					LastRunAt:   time.Now(),
+				})
+				logger.Successf("TaskManager", "Task %s executed successfully", name)
+				tm.triggerDependentTasks(name)
+			}
+		}(dependent.taskName, dependent.taskDefinition)
 	}
 }
 
@@ -320,13 +313,16 @@ func (tm *TaskManager) GetTaskStatus(taskName string) *types.TaskStatus {
 }
 
 func (tm *TaskManager) GetAllTaskStatuses() map[string]*types.TaskStatus {
-	statuses := make(map[string]*types.TaskStatus)
 	tm.Mutex.Lock()
+	taskNames := make([]string, 0, len(tm.Tasks))
 	for name := range tm.Tasks {
-		tm.Mutex.Unlock()
-		statuses[name] = tm.GetTaskStatus(name)
-		tm.Mutex.Lock()
+		taskNames = append(taskNames, name)
 	}
 	tm.Mutex.Unlock()
+
+	statuses := make(map[string]*types.TaskStatus, len(taskNames))
+	for _, name := range taskNames {
+		statuses[name] = tm.GetTaskStatus(name)
+	}
 	return statuses
 }

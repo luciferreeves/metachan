@@ -70,21 +70,17 @@ func AnimeUpdate() error {
 		needsUpdate := false
 		reason := ""
 
-		title := ""
-		if series.Title != nil {
-			if series.Title.Romaji != "" {
-				title = series.Title.Romaji
-			} else if series.Title.English != "" {
-				title = series.Title.English
-			}
+		title := series.Title.Romaji
+		if title == "" {
+			title = series.Title.English
 		}
 
 		logger.Debugf("AnimeUpdate", "Checking anime: %s (ID: %d)", title, series.MALID)
 
-		if series.NextAiring == nil || series.NextAiring.AiringAt == 0 {
+		if series.NextAiringAt == 0 {
 			needsUpdate = true
 			reason = "missing next episode data"
-		} else if int64(series.NextAiring.AiringAt) <= currentTime {
+		} else if int64(series.NextAiringAt) <= currentTime {
 			needsUpdate = true
 			reason = "next episode already aired"
 		}
@@ -97,7 +93,7 @@ func AnimeUpdate() error {
 
 		if !needsUpdate {
 			logger.Debugf("AnimeUpdate", "Skipping update for %s (ID: %d) - no update needed. Next airing at: %d",
-				title, series.MALID, series.NextAiring.AiringAt)
+				title, series.MALID, series.NextAiringAt)
 			continue
 		}
 
@@ -121,13 +117,9 @@ func AnimeUpdate() error {
 }
 
 func updateAnime(series entities.Anime, reason string) {
-	title := ""
-	if series.Title != nil {
-		if series.Title.English != "" {
-			title = series.Title.English
-		} else if series.Title.Romaji != "" {
-			title = series.Title.Romaji
-		}
+	title := series.Title.English
+	if title == "" {
+		title = series.Title.Romaji
 	}
 
 	logger.Infof("AnimeUpdate", "Updating anime: %s (MAL ID: %d) - %s", title, series.MALID, reason)
@@ -170,16 +162,16 @@ func shouldSaveUpdate(oldAnime *entities.Anime, newAnime *entities.Anime) bool {
 		return true
 	}
 
-	oldHasNext := oldAnime.NextAiring != nil && oldAnime.NextAiring.AiringAt > 0
-	newHasNext := newAnime.NextAiring != nil && newAnime.NextAiring.AiringAt > 0
+	oldHasNext := oldAnime.NextAiringAt > 0
+	newHasNext := newAnime.NextAiringAt > 0
 
 	if oldHasNext != newHasNext {
 		return true
 	}
 
 	if oldHasNext && newHasNext {
-		if oldAnime.NextAiring.AiringAt != newAnime.NextAiring.AiringAt ||
-			oldAnime.NextAiring.Episode != newAnime.NextAiring.Episode {
+		if oldAnime.NextAiringAt != newAnime.NextAiringAt ||
+			oldAnime.NextAiringEpisode != newAnime.NextAiringEpisode {
 			return true
 		}
 	}

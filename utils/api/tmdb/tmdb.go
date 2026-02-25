@@ -312,12 +312,8 @@ func AttachEpisodeDescriptions(anime *entities.Anime) error {
 		return nil
 	}
 
-	title := ""
-	alternativeTitle := ""
-	if anime.Title != nil {
-		title = anime.Title.Romaji
-		alternativeTitle = anime.Title.English
-	}
+	title := anime.Title.Romaji
+	alternativeTitle := anime.Title.English
 
 	tmdbID := 0
 	malID := anime.MALID
@@ -443,12 +439,10 @@ func AttachEpisodeDescriptions(anime *entities.Anime) error {
 			episode.EpisodeNumber = tmdbEpisodes[i].EpisodeNumber
 
 			titleForID := ""
-			if episode.Title != nil {
-				if episode.Title.English != "" {
-					titleForID = episode.Title.English
-				} else if episode.Title.Romaji != "" {
-					titleForID = episode.Title.Romaji
-				}
+			if episode.Title.English != "" {
+				titleForID = episode.Title.English
+			} else if episode.Title.Romaji != "" {
+				titleForID = episode.Title.Romaji
 			}
 			if titleForID == "" && tmdbEpisodes[i].Name != "" {
 				titleForID = tmdbEpisodes[i].Name
@@ -565,14 +559,9 @@ func EnrichEpisodeFromMovie(anime *entities.Anime) error {
 
 	episode := &anime.Episodes[0]
 
-	title := ""
-	alternativeTitle := ""
-	japaneseTitle := ""
-	if anime.Title != nil {
-		title = anime.Title.Romaji
-		alternativeTitle = anime.Title.English
-		japaneseTitle = anime.Title.Japanese
-	}
+	title := anime.Title.Romaji
+	alternativeTitle := anime.Title.English
+	japaneseTitle := anime.Title.Japanese
 
 	tmdbID := 0
 	malID := anime.MALID
@@ -580,10 +569,7 @@ func EnrichEpisodeFromMovie(anime *entities.Anime) error {
 		tmdbID = anime.Mapping.TMDB
 	}
 
-	animeScore := 0.0
-	if anime.Scores != nil {
-		animeScore = anime.Scores.Score
-	}
+	animeScore := anime.Scores.Score
 
 	logger.Debugf("TMDB", "Fetching movie episode data for: %s", title)
 
@@ -622,12 +608,11 @@ func EnrichEpisodeFromMovie(anime *entities.Anime) error {
 		description = noDescription
 	}
 
-	if episode.Title == nil {
-		episode.Title = &entities.Title{}
+	episode.Title = entities.EpisodeTitle{
+		English:  movieDetails.Title,
+		Japanese: japaneseTitle,
+		Romaji:   title,
 	}
-	episode.Title.English = movieDetails.Title
-	episode.Title.Japanese = japaneseTitle
-	episode.Title.Romaji = title
 
 	movieScore := float64(int((animeScore/2.0)*100)) / 100
 

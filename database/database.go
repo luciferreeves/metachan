@@ -4,6 +4,7 @@ import (
 	"metachan/config"
 	"metachan/enums"
 	"metachan/utils/logger"
+	"time"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -39,6 +40,14 @@ func init() {
 	if err != nil {
 		logger.Fatalf("Database", "Error connecting to database: %v", err)
 	}
+
+	sqlDB, err := DB.DB()
+	if err != nil {
+		logger.Fatalf("Database", "Failed to get underlying sql.DB: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetConnMaxLifetime(time.Hour)
 
 	logger.Successf("Database", "Database connection established successfully")
 

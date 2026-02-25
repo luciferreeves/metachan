@@ -152,11 +152,12 @@ func EnrichEpisodesFromTVDB(anime *entities.Anime, tvdbEpisodes []types.TVDBEpis
 
 		episode := &anime.Episodes[i]
 
-		if episode.Title == nil {
-			episode.Title = &entities.Title{}
-		}
 		if ep.Name != "" {
-			episode.Title.English = ep.Name
+			episode.Title = entities.EpisodeTitle{
+				English:  ep.Name,
+				Japanese: episode.Title.Japanese,
+				Romaji:   episode.Title.Romaji,
+			}
 		}
 
 		if ep.Image != "" {
@@ -181,7 +182,7 @@ func EnrichEpisodesFromTVDB(anime *entities.Anime, tvdbEpisodes []types.TVDBEpis
 		episode.EpisodeLength = float64(ep.Runtime)
 
 		titleForID := ep.Name
-		if titleForID == "" && episode.Title != nil {
+		if titleForID == "" {
 			if episode.Title.English != "" {
 				titleForID = episode.Title.English
 			} else if episode.Title.Romaji != "" {

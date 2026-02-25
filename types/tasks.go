@@ -7,7 +7,6 @@ type Task struct {
 	Interval     time.Duration
 	Execute      func() error
 	OnResume     func()
-	LastRun      time.Time
 	Dependencies []string
 }
 

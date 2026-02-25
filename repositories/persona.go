@@ -36,43 +36,45 @@ func UpdateCharacterDetails(malID int, name, nameKanji, url, imageURL, about str
 		return err
 	}
 
-	DB.Where("character_id = ?", char.ID).Delete(&entities.CharacterVoiceActor{})
-	for _, cva := range voiceActors {
-		va := cva.Person
-		if va == nil {
-			continue
+	return DB.Transaction(func(tx *gorm.DB) error {
+		tx.Where("character_id = ?", char.ID).Delete(&entities.CharacterVoiceActor{})
+		for _, cva := range voiceActors {
+			va := cva.Person
+			if va == nil {
+				continue
+			}
+
+			tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "mal_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"url", "image", "name"}),
+			}).Create(va)
+			if va.ID == 0 {
+				tx.Where("mal_id = ?", va.MALID).First(va)
+			}
+
+			tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "character_id"}, {Name: "person_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"language"}),
+			}).Create(&entities.CharacterVoiceActor{
+				CharacterID: char.ID,
+				PersonID:    va.ID,
+				Language:    cva.Language,
+			})
 		}
 
-		DB.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "mal_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"url", "image", "name"}),
-		}).Create(va)
-		if va.ID == 0 {
-			DB.Where("mal_id = ?", va.MALID).First(va)
+		tx.Where("character_id = ?", char.ID).Delete(&entities.CharacterAnimeAppearance{})
+		for i := range animeAppearances {
+			animeAppearances[i].CharacterID = char.ID
+		}
+		if len(animeAppearances) > 0 {
+			tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "character_id"}, {Name: "anime_mal_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"title", "url", "image_url", "role"}),
+			}).Create(&animeAppearances)
 		}
 
-		DB.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "character_id"}, {Name: "person_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"language"}),
-		}).Create(&entities.CharacterVoiceActor{
-			CharacterID: char.ID,
-			PersonID:    va.ID,
-			Language:    cva.Language,
-		})
-	}
-
-	DB.Where("character_id = ?", char.ID).Delete(&entities.CharacterAnimeAppearance{})
-	for i := range animeAppearances {
-		animeAppearances[i].CharacterID = char.ID
-	}
-	if len(animeAppearances) > 0 {
-		DB.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "character_id"}, {Name: "anime_mal_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"title", "url", "image_url", "role"}),
-		}).Create(&animeAppearances)
-	}
-
-	return nil
+		return nil
+	})
 }
 
 func GetAnimeCharacters[T idType](maptype enums.MappingType, id T) ([]entities.Character, error) {
@@ -98,15 +100,31 @@ func GetAnimeCharacters[T idType](maptype enums.MappingType, id T) ([]entities.C
 		Where("anime_id = ?", anime.ID).
 		Scan(&rows)
 
+	if len(rows) == 0 {
+		return []entities.Character{}, nil
+	}
+
+	charIDs := make([]uint, len(rows))
+	roleMap := make(map[uint]string, len(rows))
+	for i, row := range rows {
+		charIDs[i] = row.CharacterID
+		roleMap[row.CharacterID] = row.Role
+	}
+
 	var characters []entities.Character
-	for _, row := range rows {
-		var char entities.Character
-		if err := DB.First(&char, row.CharacterID).Error; err != nil {
-			continue
-		}
-		DB.Preload("Person").Where("character_id = ?", char.ID).Find(&char.VoiceActors)
-		char.Role = row.Role
-		characters = append(characters, char)
+	DB.Where("id IN ?", charIDs).Find(&characters)
+
+	var voiceActors []entities.CharacterVoiceActor
+	DB.Preload("Person").Where("character_id IN ?", charIDs).Find(&voiceActors)
+
+	voiceActorsByCharacterID := make(map[uint][]entities.CharacterVoiceActor)
+	for _, voiceActor := range voiceActors {
+		voiceActorsByCharacterID[voiceActor.CharacterID] = append(voiceActorsByCharacterID[voiceActor.CharacterID], voiceActor)
+	}
+
+	for i := range characters {
+		characters[i].Role = roleMap[characters[i].ID]
+		characters[i].VoiceActors = voiceActorsByCharacterID[characters[i].ID]
 	}
 
 	return characters, nil
@@ -159,17 +177,34 @@ func loadAnimeCharacters(anime *entities.Anime) {
 		Where("anime_id = ?", anime.ID).
 		Scan(&rows)
 
-	for _, row := range rows {
-		var char entities.Character
-		if err := DB.First(&char, row.CharacterID).Error; err != nil {
-			continue
-		}
-		DB.Preload("Person").
-			Where("character_id = ?", char.ID).
-			Find(&char.VoiceActors)
-		char.Role = row.Role
-		anime.Characters = append(anime.Characters, char)
+	if len(rows) == 0 {
+		return
 	}
+
+	charIDs := make([]uint, len(rows))
+	roleMap := make(map[uint]string, len(rows))
+	for i, row := range rows {
+		charIDs[i] = row.CharacterID
+		roleMap[row.CharacterID] = row.Role
+	}
+
+	var characters []entities.Character
+	DB.Where("id IN ?", charIDs).Find(&characters)
+
+	var voiceActors []entities.CharacterVoiceActor
+	DB.Preload("Person").Where("character_id IN ?", charIDs).Find(&voiceActors)
+
+	voiceActorsByCharacterID := make(map[uint][]entities.CharacterVoiceActor)
+	for _, voiceActor := range voiceActors {
+		voiceActorsByCharacterID[voiceActor.CharacterID] = append(voiceActorsByCharacterID[voiceActor.CharacterID], voiceActor)
+	}
+
+	for i := range characters {
+		characters[i].Role = roleMap[characters[i].ID]
+		characters[i].VoiceActors = voiceActorsByCharacterID[characters[i].ID]
+	}
+
+	anime.Characters = characters
 }
 
 func SaveAnimeCharacters(animeID uint, characters []entities.Character) error {
@@ -279,40 +314,48 @@ func UpdatePersonDetails(
 		return err
 	}
 
-	DB.Where("person_id = ?", p.ID).Delete(&entities.PersonVoiceRole{})
-	for i := range voiceRoles {
-		voiceRoles[i].PersonID = p.ID
-	}
-	if len(voiceRoles) > 0 {
-		DB.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "person_id"}, {Name: "anime_mal_id"}, {Name: "character_mal_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"role", "anime_title", "anime_url", "anime_image_url", "character_name", "character_url", "character_image_url"}),
-		}).Create(&voiceRoles)
-	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		tx.Where("person_id = ?", p.ID).Delete(&entities.PersonVoiceRole{})
+		for i := range voiceRoles {
+			voiceRoles[i].PersonID = p.ID
+		}
+		if len(voiceRoles) > 0 {
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "person_id"}, {Name: "anime_mal_id"}, {Name: "character_mal_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"role", "anime_title", "anime_url", "anime_image_url", "character_name", "character_url", "character_image_url"}),
+			}).Create(&voiceRoles).Error; err != nil {
+				return err
+			}
+		}
 
-	DB.Where("person_id = ?", p.ID).Delete(&entities.PersonAnimeCredit{})
-	for i := range animeCredits {
-		animeCredits[i].PersonID = p.ID
-	}
-	if len(animeCredits) > 0 {
-		DB.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "person_id"}, {Name: "anime_mal_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"position", "anime_title", "anime_url", "anime_image_url"}),
-		}).Create(&animeCredits)
-	}
+		tx.Where("person_id = ?", p.ID).Delete(&entities.PersonAnimeCredit{})
+		for i := range animeCredits {
+			animeCredits[i].PersonID = p.ID
+		}
+		if len(animeCredits) > 0 {
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "person_id"}, {Name: "anime_mal_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"position", "anime_title", "anime_url", "anime_image_url"}),
+			}).Create(&animeCredits).Error; err != nil {
+				return err
+			}
+		}
 
-	DB.Where("person_id = ?", p.ID).Delete(&entities.PersonMangaCredit{})
-	for i := range mangaCredits {
-		mangaCredits[i].PersonID = p.ID
-	}
-	if len(mangaCredits) > 0 {
-		DB.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "person_id"}, {Name: "manga_mal_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"position", "manga_title", "manga_url", "manga_image_url"}),
-		}).Create(&mangaCredits)
-	}
+		tx.Where("person_id = ?", p.ID).Delete(&entities.PersonMangaCredit{})
+		for i := range mangaCredits {
+			mangaCredits[i].PersonID = p.ID
+		}
+		if len(mangaCredits) > 0 {
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "person_id"}, {Name: "manga_mal_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"position", "manga_title", "manga_url", "manga_image_url"}),
+			}).Create(&mangaCredits).Error; err != nil {
+				return err
+			}
+		}
 
-	return nil
+		return nil
+	})
 }
 
 func SetPersonEnriched(malID int) error {
@@ -334,46 +377,49 @@ func GetAnimePeople[T idType](maptype enums.MappingType, id T) ([]entities.Perso
 		return nil, errors.New("anime not found")
 	}
 
-	var charRows []struct {
-		CharacterID uint
-	}
+	var charIDs []uint
 	DB.Table("anime_characters").
 		Select("character_id").
 		Where("anime_id = ?", anime.ID).
-		Scan(&charRows)
+		Pluck("character_id", &charIDs)
+
+	if len(charIDs) == 0 {
+		return []entities.Person{}, nil
+	}
+
+	var characters []entities.Character
+	DB.Where("id IN ?", charIDs).Find(&characters)
+
+	characterByID := make(map[uint]*entities.Character, len(characters))
+	for i := range characters {
+		characterByID[characters[i].ID] = &characters[i]
+	}
+
+	var characterVoiceActors []entities.CharacterVoiceActor
+	DB.Preload("Person").Where("character_id IN ?", charIDs).Find(&characterVoiceActors)
 
 	personMap := make(map[uint]*entities.Person)
-	personChars := make(map[uint][]entities.PersonCharacterEntry)
+	personCharacters := make(map[uint][]entities.PersonCharacterEntry)
 
-	for _, row := range charRows {
-		var char entities.Character
-		if err := DB.First(&char, row.CharacterID).Error; err != nil {
+	for _, voiceActorEntry := range characterVoiceActors {
+		if voiceActorEntry.Person == nil {
 			continue
 		}
-
-		var cvas []entities.CharacterVoiceActor
-		DB.Preload("Person").Where("character_id = ?", char.ID).Find(&cvas)
-
-		for _, cva := range cvas {
-			if cva.Person == nil {
-				continue
-			}
-			pID := cva.PersonID
-			if _, exists := personMap[pID]; !exists {
-				personMap[pID] = cva.Person
-			}
-			charCopy := char
-			personChars[pID] = append(personChars[pID], entities.PersonCharacterEntry{
-				Character: &charCopy,
-				Language:  cva.Language,
+		if _, exists := personMap[voiceActorEntry.PersonID]; !exists {
+			personMap[voiceActorEntry.PersonID] = voiceActorEntry.Person
+		}
+		if character, ok := characterByID[voiceActorEntry.CharacterID]; ok {
+			personCharacters[voiceActorEntry.PersonID] = append(personCharacters[voiceActorEntry.PersonID], entities.PersonCharacterEntry{
+				Character: character,
+				Language:  voiceActorEntry.Language,
 			})
 		}
 	}
 
 	result := make([]entities.Person, 0, len(personMap))
-	for pID, p := range personMap {
-		p.Characters = personChars[pID]
-		result = append(result, *p)
+	for personID, person := range personMap {
+		person.Characters = personCharacters[personID]
+		result = append(result, *person)
 	}
 	return result, nil
 }

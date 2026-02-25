@@ -39,6 +39,10 @@ var (
 	}
 )
 
+func StopRateLimiters() {
+	rateLimiter.Stop()
+}
+
 func (c *client) getBackOffDuration(attempt int) time.Duration {
 	return time.Duration(float64(c.backoff) * math.Pow(2, float64(attempt-1)))
 }

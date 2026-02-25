@@ -54,3 +54,9 @@ func (m *MultiLimiter) Wait() {
 		limiter.Wait()
 	}
 }
+
+func (m *MultiLimiter) Stop() {
+	for _, limiter := range m.limiters {
+		limiter.Stop()
+	}
+}

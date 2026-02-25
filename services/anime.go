@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"crypto/md5"
 	"fmt"
 	"metachan/entities"
@@ -17,7 +18,12 @@ import (
 	"metachan/utils/logger"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 )
+
+var flightGroup singleflight.Group
 
 func GetAnime(mapping *entities.Mapping) (*entities.Anime, error) {
 	if mapping == nil {
@@ -25,6 +31,18 @@ func GetAnime(mapping *entities.Mapping) (*entities.Anime, error) {
 		return nil, fmt.Errorf("mapping is nil")
 	}
 
+	key := fmt.Sprintf("anime:%d", mapping.MAL)
+	result, err, _ := flightGroup.Do(key, func() (interface{}, error) {
+		return getAnimeInternal(mapping)
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return result.(*entities.Anime), nil
+}
+
+func getAnimeInternal(mapping *entities.Mapping) (*entities.Anime, error) {
 	malID := mapping.MAL
 	logger.Infof("AnimeService", "Fetching anime data for MAL ID: %d", malID)
 
@@ -70,26 +88,71 @@ func fetchAnime(mapping *entities.Mapping, existing *entities.Anime) (*entities.
 		}
 	}
 
-	jikanAnime, err := jikan.GetAnimeByMALID(malID)
-	if err != nil {
-		logger.Errorf("AnimeService", "Failed to fetch anime from Jikan: %v", err)
-		return nil, fmt.Errorf("failed to fetch anime from Jikan: %w", err)
+	var jikanAnime *types.JikanAnimeResponse
+	var jikanEpisodes *types.JikanAnimeEpisodeResponse
+	var jikanCharacters *types.JikanAnimeCharacterResponse
+	var anilistData *types.AnilistAnimeResponse
+	var malSyncData *types.MalsyncAnimeResponse
+
+	fetchGroup, _ := errgroup.WithContext(context.Background())
+
+	fetchGroup.Go(func() error {
+		var err error
+		jikanAnime, err = jikan.GetAnimeByMALID(malID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch anime from Jikan: %w", err)
+		}
+		return nil
+	})
+
+	fetchGroup.Go(func() error {
+		var err error
+		jikanEpisodes, err = jikan.GetAnimeEpisodesByMALID(malID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch episodes from Jikan: %w", err)
+		}
+		return nil
+	})
+
+	fetchGroup.Go(func() error {
+		var err error
+		jikanCharacters, err = jikan.GetAnimeCharactersByMALID(malID)
+		if err != nil {
+			logger.Warnf("AnimeService", "Failed to fetch characters from Jikan: %v", err)
+		}
+		return nil
+	})
+
+	if mapping.Anilist > 0 {
+		fetchGroup.Go(func() error {
+			var err error
+			anilistData, err = anilist.GetAnimeByAnilistID(mapping.Anilist)
+			if err != nil {
+				logger.Warnf("AnimeService", "Failed to fetch Anilist data: %v", err)
+			}
+			return nil
+		})
 	}
 
-	jikanEpisodes, err := jikan.GetAnimeEpisodesByMALID(malID)
-	if err != nil {
-		logger.Errorf("AnimeService", "Failed to fetch episodes from Jikan: %v", err)
-		return nil, fmt.Errorf("failed to fetch episodes from Jikan: %w", err)
-	}
+	fetchGroup.Go(func() error {
+		var err error
+		malSyncData, err = malsync.GetAnimeByMALID(malID)
+		if err != nil {
+			logger.Warnf("AnimeService", "Failed to fetch MALsync data: %v", err)
+		}
+		return nil
+	})
 
-	jikanCharacters, err := jikan.GetAnimeCharactersByMALID(malID)
-	if err != nil {
-		logger.Warnf("AnimeService", "Failed to fetch characters from Jikan: %v", err)
+	if err := fetchGroup.Wait(); err != nil {
+		logger.Errorf("AnimeService", "Failed to fetch anime data: %v", err)
+		return nil, err
 	}
 
 	anime.Episodes = nil
 	anime.Characters = nil
 	anime.Genres = nil
+	anime.Themes = nil
+	anime.Demographics = nil
 	anime.Producers = nil
 	anime.Studios = nil
 	anime.Licensors = nil
@@ -97,19 +160,11 @@ func fetchAnime(mapping *entities.Mapping, existing *entities.Anime) (*entities.
 
 	applyJikanData(anime, jikanAnime, jikanEpisodes, jikanCharacters)
 
-	if mapping.Anilist > 0 {
-		anilistData, err := anilist.GetAnimeByAnilistID(mapping.Anilist)
-		if err != nil {
-			logger.Warnf("AnimeService", "Failed to fetch Anilist data: %v", err)
-		} else {
-			applyAnilistData(anime, anilistData)
-		}
+	if anilistData != nil {
+		applyAnilistData(anime, anilistData)
 	}
 
-	malSyncData, err := malsync.GetAnimeByMALID(malID)
-	if err != nil {
-		logger.Warnf("AnimeService", "Failed to fetch MALsync data: %v", err)
-	} else {
+	if malSyncData != nil {
 		applyMALsyncData(anime, malSyncData)
 	}
 
@@ -187,17 +242,17 @@ func applyJikanData(anime *entities.Anime, jikanAnime *types.JikanAnimeResponse,
 	anime.Duration = jikanAnime.Data.Duration
 	anime.Season = jikanAnime.Data.Season
 	anime.Year = jikanAnime.Data.Year
+	anime.Rating = jikanAnime.Data.Rating
+	anime.Background = jikanAnime.Data.Background
 
-	if jikanAnime.Data.Title != "" || jikanAnime.Data.TitleEnglish != "" || jikanAnime.Data.TitleJapanese != "" {
-		anime.Title = &entities.Title{
-			Romaji:   jikanAnime.Data.Title,
-			English:  jikanAnime.Data.TitleEnglish,
-			Japanese: jikanAnime.Data.TitleJapanese,
-			Synonyms: jikanAnime.Data.TitleSynonyms,
-		}
+	anime.Title = entities.AnimeTitle{
+		Romaji:   jikanAnime.Data.Title,
+		English:  jikanAnime.Data.TitleEnglish,
+		Japanese: jikanAnime.Data.TitleJapanese,
+		Synonyms: jikanAnime.Data.TitleSynonyms,
 	}
 
-	anime.Scores = &entities.Scores{
+	anime.Scores = entities.AnimeScores{
 		Score:      jikanAnime.Data.Score,
 		ScoredBy:   jikanAnime.Data.ScoredBy,
 		Rank:       jikanAnime.Data.Rank,
@@ -206,90 +261,100 @@ func applyJikanData(anime *entities.Anime, jikanAnime *types.JikanAnimeResponse,
 		Favorites:  jikanAnime.Data.Favorites,
 	}
 
-	if jikanAnime.Data.Images.JPG.ImageURL != "" {
-		anime.Images = &entities.Images{
-			Small:    jikanAnime.Data.Images.JPG.SmallImageURL,
-			Large:    jikanAnime.Data.Images.JPG.LargeImageURL,
-			Original: jikanAnime.Data.Images.JPG.ImageURL,
+	anime.Images = entities.AnimeImages{
+		Small:    jikanAnime.Data.Images.JPG.SmallImageURL,
+		Large:    jikanAnime.Data.Images.JPG.LargeImageURL,
+		Original: jikanAnime.Data.Images.JPG.ImageURL,
+	}
+
+	anime.Aired = entities.AnimeAired{
+		String: jikanAnime.Data.Aired.String,
+	}
+	if jikanAnime.Data.Aired.From != "" {
+		if parsedTime, err := time.Parse(time.RFC3339, jikanAnime.Data.Aired.From); err == nil {
+			anime.Aired.From = &parsedTime
+		}
+	}
+	if jikanAnime.Data.Aired.To != "" {
+		if parsedTime, err := time.Parse(time.RFC3339, jikanAnime.Data.Aired.To); err == nil {
+			anime.Aired.To = &parsedTime
 		}
 	}
 
-	if jikanAnime.Data.Aired.From != "" || jikanAnime.Data.Aired.To != "" {
-		anime.AiringStatus = &entities.AiringStatus{
-			String: jikanAnime.Data.Aired.String,
-		}
-		if jikanAnime.Data.Aired.Prop.From.Year > 0 {
-			anime.AiringStatus.From = &entities.Date{
-				Day:    jikanAnime.Data.Aired.Prop.From.Day,
-				Month:  jikanAnime.Data.Aired.Prop.From.Month,
-				Year:   jikanAnime.Data.Aired.Prop.From.Year,
-				String: jikanAnime.Data.Aired.From,
-			}
-		}
-		if jikanAnime.Data.Aired.Prop.To.Year > 0 {
-			anime.AiringStatus.To = &entities.Date{
-				Day:    jikanAnime.Data.Aired.Prop.To.Day,
-				Month:  jikanAnime.Data.Aired.Prop.To.Month,
-				Year:   jikanAnime.Data.Aired.Prop.To.Year,
-				String: jikanAnime.Data.Aired.To,
-			}
-		}
+	anime.Broadcast = entities.AnimeBroadcast{
+		Day:      jikanAnime.Data.Broadcast.Day,
+		Time:     jikanAnime.Data.Broadcast.Time,
+		Timezone: jikanAnime.Data.Broadcast.Timezone,
+		String:   jikanAnime.Data.Broadcast.String,
 	}
 
-	if jikanAnime.Data.Broadcast.Day != "" {
-		anime.Broadcast = &entities.Broadcast{
-			Day:      jikanAnime.Data.Broadcast.Day,
-			Time:     jikanAnime.Data.Broadcast.Time,
-			Timezone: jikanAnime.Data.Broadcast.Timezone,
-			String:   jikanAnime.Data.Broadcast.String,
-		}
+	anime.Trailer = entities.AnimeTrailer{
+		YoutubeID: jikanAnime.Data.Trailer.YoutubeID,
+		URL:       jikanAnime.Data.Trailer.URL,
+		EmbedURL:  jikanAnime.Data.Trailer.EmbedURL,
 	}
 
-	for _, jg := range jikanAnime.Data.Genres {
+	for _, genreEntry := range jikanAnime.Data.Genres {
 		anime.Genres = append(anime.Genres, entities.Genre{
-			GenreID: jg.MALID,
-			Name:    jg.Name,
-			URL:     jg.URL,
+			GenreID: genreEntry.MALID,
+			Name:    genreEntry.Name,
+			URL:     genreEntry.URL,
 		})
 	}
 
-	for _, jg := range jikanAnime.Data.ExplicitGenres {
+	for _, genreEntry := range jikanAnime.Data.ExplicitGenres {
 		anime.Genres = append(anime.Genres, entities.Genre{
-			GenreID: jg.MALID,
-			Name:    jg.Name,
-			URL:     jg.URL,
+			GenreID: genreEntry.MALID,
+			Name:    genreEntry.Name,
+			URL:     genreEntry.URL,
 		})
 	}
 
-	for _, jp := range jikanAnime.Data.Producers {
+	for _, themeEntry := range jikanAnime.Data.Themes {
+		anime.Themes = append(anime.Themes, entities.Genre{
+			GenreID: themeEntry.MALID,
+			Name:    themeEntry.Name,
+			URL:     themeEntry.URL,
+		})
+	}
+
+	for _, demographicEntry := range jikanAnime.Data.Demographics {
+		anime.Demographics = append(anime.Demographics, entities.Genre{
+			GenreID: demographicEntry.MALID,
+			Name:    demographicEntry.Name,
+			URL:     demographicEntry.URL,
+		})
+	}
+
+	for _, producerEntry := range jikanAnime.Data.Producers {
 		producer := entities.Producer{
-			MALID: jp.MALID,
-			URL:   jp.URL,
+			MALID: producerEntry.MALID,
+			URL:   producerEntry.URL,
 		}
-		if jp.Name != "" {
-			producer.Titles = []entities.SimpleTitle{{Title: jp.Name, Type: "Default"}}
+		if producerEntry.Name != "" {
+			producer.Titles = []entities.SimpleTitle{{Title: producerEntry.Name, Type: "Default"}}
 		}
 		anime.Producers = append(anime.Producers, producer)
 	}
 
-	for _, js := range jikanAnime.Data.Studios {
+	for _, studioEntry := range jikanAnime.Data.Studios {
 		studio := entities.Producer{
-			MALID: js.MALID,
-			URL:   js.URL,
+			MALID: studioEntry.MALID,
+			URL:   studioEntry.URL,
 		}
-		if js.Name != "" {
-			studio.Titles = []entities.SimpleTitle{{Title: js.Name, Type: "Default"}}
+		if studioEntry.Name != "" {
+			studio.Titles = []entities.SimpleTitle{{Title: studioEntry.Name, Type: "Default"}}
 		}
 		anime.Studios = append(anime.Studios, studio)
 	}
 
-	for _, jl := range jikanAnime.Data.Licensors {
+	for _, licensorEntry := range jikanAnime.Data.Licensors {
 		licensor := entities.Producer{
-			MALID: jl.MALID,
-			URL:   jl.URL,
+			MALID: licensorEntry.MALID,
+			URL:   licensorEntry.URL,
 		}
-		if jl.Name != "" {
-			licensor.Titles = []entities.SimpleTitle{{Title: jl.Name, Type: "Default"}}
+		if licensorEntry.Name != "" {
+			licensor.Titles = []entities.SimpleTitle{{Title: licensorEntry.Name, Type: "Default"}}
 		}
 		anime.Licensors = append(anime.Licensors, licensor)
 	}
@@ -297,54 +362,51 @@ func applyJikanData(anime *entities.Anime, jikanAnime *types.JikanAnimeResponse,
 	anime.TotalEpisodes = jikanAnime.Data.Episodes
 	anime.AiredEpisodes = len(jikanEpisodes.Data)
 
-	for _, je := range jikanEpisodes.Data {
+	for _, jikanEpisode := range jikanEpisodes.Data {
 		episode := entities.Episode{
-			EpisodeNumber: je.MALID,
-			URL:           je.URL,
-			Aired:         je.Aired,
-			Score:         je.Score,
-			Filler:        je.Filler,
-			Recap:         je.Recap,
-			ForumURL:      je.ForumURL,
+			EpisodeNumber: jikanEpisode.MALID,
+			URL:           jikanEpisode.URL,
+			Aired:         jikanEpisode.Aired,
+			Score:         jikanEpisode.Score,
+			Filler:        jikanEpisode.Filler,
+			Recap:         jikanEpisode.Recap,
+			ForumURL:      jikanEpisode.ForumURL,
+			Title: entities.EpisodeTitle{
+				English:  jikanEpisode.Title,
+				Japanese: jikanEpisode.TitleJapanese,
+				Romaji:   jikanEpisode.TitleRomaji,
+			},
 		}
 
-		if je.Title != "" || je.TitleJapanese != "" || je.TitleRomaji != "" {
-			episode.Title = &entities.Title{
-				English:  je.Title,
-				Japanese: je.TitleJapanese,
-				Romaji:   je.TitleRomaji,
-			}
-		}
-
-		titleForID := je.Title
+		titleForID := jikanEpisode.Title
 		if titleForID == "" {
-			titleForID = je.TitleRomaji
+			titleForID = jikanEpisode.TitleRomaji
 		}
-		episode.EpisodeID = generateEpisodeID(anime.MALID, je.MALID, titleForID)
+		episode.EpisodeID = generateEpisodeID(anime.MALID, jikanEpisode.MALID, titleForID)
 
 		anime.Episodes = append(anime.Episodes, episode)
 	}
 
 	if jikanCharacters != nil {
-		for _, jc := range jikanCharacters.Data {
-			char := entities.Character{
-				MALID:    jc.Character.MALID,
-				Name:     jc.Character.Name,
-				URL:      jc.Character.URL,
-				ImageURL: jc.Character.Images.JPG.ImageURL,
-				Role:     jc.Role,
+		for _, jikanCharacter := range jikanCharacters.Data {
+			character := entities.Character{
+				MALID:    jikanCharacter.Character.MALID,
+				Name:     jikanCharacter.Character.Name,
+				URL:      jikanCharacter.Character.URL,
+				ImageURL: jikanCharacter.Character.Images.JPG.ImageURL,
+				Role:     jikanCharacter.Role,
 			}
 
-			for _, va := range jc.VoiceActors {
-				char.VoiceActors = append(char.VoiceActors, entities.CharacterVoiceActor{
-					Language: va.Language,
+			for _, voiceActor := range jikanCharacter.VoiceActors {
+				character.VoiceActors = append(character.VoiceActors, entities.CharacterVoiceActor{
+					Language: voiceActor.Language,
 					Person: &entities.Person{
-						Image: va.Person.Images.JPG.ImageURL,
+						Image: voiceActor.Person.Images.JPG.ImageURL,
 					},
 				})
 			}
 
-			anime.Characters = append(anime.Characters, char)
+			anime.Characters = append(anime.Characters, character)
 		}
 	}
 }
@@ -360,8 +422,8 @@ func applyAnilistData(anime *entities.Anime, anilistData *types.AnilistAnimeResp
 		anime.Color = media.CoverImage.Color
 	}
 
-	if anime.Covers == nil && (media.CoverImage.Medium != "" || media.CoverImage.Large != "" || media.CoverImage.ExtraLarge != "") {
-		anime.Covers = &entities.Images{
+	if anime.Covers.Original == "" && (media.CoverImage.Medium != "" || media.CoverImage.Large != "" || media.CoverImage.ExtraLarge != "") {
+		anime.Covers = entities.AnimeImages{
 			Small:    media.CoverImage.Medium,
 			Large:    media.CoverImage.Large,
 			Original: media.CoverImage.ExtraLarge,
@@ -369,16 +431,14 @@ func applyAnilistData(anime *entities.Anime, anilistData *types.AnilistAnimeResp
 	}
 
 	if media.NextAiringEpisode.AiringAt > 0 {
-		anime.NextAiring = &entities.NextEpisode{
-			Episode:  media.NextAiringEpisode.Episode,
-			AiringAt: media.NextAiringEpisode.AiringAt,
-		}
+		anime.NextAiringAt = media.NextAiringEpisode.AiringAt
+		anime.NextAiringEpisode = media.NextAiringEpisode.Episode
 	}
 
-	for _, ep := range media.AiringSchedule.Nodes {
+	for _, scheduleNode := range media.AiringSchedule.Nodes {
 		anime.Schedule = append(anime.Schedule, entities.EpisodeSchedule{
-			Episode:  ep.Episode,
-			AiringAt: ep.AiringAt,
+			Episode:  scheduleNode.Episode,
+			AiringAt: scheduleNode.AiringAt,
 		})
 	}
 }
@@ -389,20 +449,20 @@ func applyMALsyncData(anime *entities.Anime, malSyncData *types.MalsyncAnimeResp
 	}
 
 	logos := extractLogosFromMALSync(malSyncData)
-	if logos != nil {
+	if logos.Small != "" {
 		anime.Logos = logos
 	}
 }
 
-func extractLogosFromMALSync(malSyncData *types.MalsyncAnimeResponse) *entities.Logos {
+func extractLogosFromMALSync(malSyncData *types.MalsyncAnimeResponse) entities.AnimeLogos {
 	if malSyncData == nil {
-		return nil
+		return entities.AnimeLogos{}
 	}
 
 	crunchyrollSites, exists := malSyncData.Sites["Crunchyroll"]
 	if !exists || len(crunchyrollSites) == 0 {
 		logger.Debugf("AnimeService", "No Crunchyroll data found in MALSync response")
-		return nil
+		return entities.AnimeLogos{}
 	}
 
 	crURL := ""
@@ -413,12 +473,12 @@ func extractLogosFromMALSync(malSyncData *types.MalsyncAnimeResponse) *entities.
 
 	if crURL == "" {
 		logger.Debugf("AnimeService", "No valid Crunchyroll URL found")
-		return nil
+		return entities.AnimeLogos{}
 	}
 
 	seriesID := extractCrunchyrollSeriesID(crURL)
 	if seriesID == "" {
-		return nil
+		return entities.AnimeLogos{}
 	}
 
 	logoSizes := map[string]int{
@@ -429,15 +489,13 @@ func extractLogosFromMALSync(malSyncData *types.MalsyncAnimeResponse) *entities.
 		"Original": 1200,
 	}
 
-	logos := &entities.Logos{
+	return entities.AnimeLogos{
 		Small:    fmt.Sprintf("https://imgsrv.crunchyroll.com/cdn-cgi/image/fit=contain,format=auto,quality=85,width=%d/keyart/%s-title_logo-en-us", logoSizes["Small"], seriesID),
 		Medium:   fmt.Sprintf("https://imgsrv.crunchyroll.com/cdn-cgi/image/fit=contain,format=auto,quality=85,width=%d/keyart/%s-title_logo-en-us", logoSizes["Medium"], seriesID),
 		Large:    fmt.Sprintf("https://imgsrv.crunchyroll.com/cdn-cgi/image/fit=contain,format=auto,quality=85,width=%d/keyart/%s-title_logo-en-us", logoSizes["Large"], seriesID),
 		XLarge:   fmt.Sprintf("https://imgsrv.crunchyroll.com/cdn-cgi/image/fit=contain,format=auto,quality=85,width=%d/keyart/%s-title_logo-en-us", logoSizes["XLarge"], seriesID),
 		Original: fmt.Sprintf("https://imgsrv.crunchyroll.com/cdn-cgi/image/fit=contain,format=auto,quality=85,width=%d/keyart/%s-title_logo-en-us", logoSizes["Original"], seriesID),
 	}
-
-	return logos
 }
 
 func extractCrunchyrollSeriesID(crURL string) string {
@@ -478,10 +536,6 @@ func applyAniskipData(episode *entities.Episode, skipData []types.AniskipResult)
 }
 
 func applyStreamingData(anime *entities.Anime) {
-	if anime.Title == nil {
-		return
-	}
-
 	searchTitle := anime.Title.Romaji
 	if searchTitle == "" {
 		searchTitle = anime.Title.English
@@ -507,26 +561,26 @@ func applyStreamingData(anime *entities.Anime) {
 	anime.DubbedCount = dubCount
 
 	if len(anime.Episodes) > 0 {
-		epNums := make([]int, len(anime.Episodes))
-		for i, ep := range anime.Episodes {
-			epNums[i] = ep.EpisodeNumber
+		episodeNumbers := make([]int, len(anime.Episodes))
+		for i, episode := range anime.Episodes {
+			episodeNumbers[i] = episode.EpisodeNumber
 		}
-		sourcesMap, err := streaming.FetchAllEpisodeSources(searchTitle, epNums)
+		sourcesMap, err := streaming.FetchAllEpisodeSources(searchTitle, episodeNumbers)
 		if err == nil {
 			for i := range anime.Episodes {
-				ep := &anime.Episodes[i]
-				if s, ok := sourcesMap[ep.EpisodeNumber]; ok {
-					sub := make([]entities.StreamingSource, len(s.Sub))
-					for j, src := range s.Sub {
-						sub[j] = entities.StreamingSource{URL: src.URL, Server: src.Server, Type: src.Type}
+				episode := &anime.Episodes[i]
+				if sources, ok := sourcesMap[episode.EpisodeNumber]; ok {
+					subSources := make([]entities.StreamingSource, len(sources.Sub))
+					for j, source := range sources.Sub {
+						subSources[j] = entities.StreamingSource{URL: source.URL, Server: source.Server, Type: source.Type}
 					}
-					dub := make([]entities.StreamingSource, len(s.Dub))
-					for j, src := range s.Dub {
-						dub[j] = entities.StreamingSource{URL: src.URL, Server: src.Server, Type: src.Type}
+					dubSources := make([]entities.StreamingSource, len(sources.Dub))
+					for j, source := range sources.Dub {
+						dubSources[j] = entities.StreamingSource{URL: source.URL, Server: source.Server, Type: source.Type}
 					}
-					ep.StreamInfo = &entities.StreamInfo{
-						SubSources: sub,
-						DubSources: dub,
+					episode.StreamInfo = &entities.StreamInfo{
+						SubSources: subSources,
+						DubSources: dubSources,
 					}
 				}
 			}
@@ -548,10 +602,10 @@ func applySeasonData(anime *entities.Anime, mapping *entities.Mapping) {
 		tvdbMappings, err := repositories.GetRelatedAnimeByTVDB(mapping.TVDB, mapping.MAL)
 		if err == nil && len(tvdbMappings) > 0 {
 			logger.Infof("AnimeService", "Found %d related anime via TVDB", len(tvdbMappings))
-			for _, m := range tvdbMappings {
-				if !malIDSet[m.MAL] {
-					malIDSet[m.MAL] = true
-					relatedMappings = append(relatedMappings, m)
+			for _, relatedMapping := range tvdbMappings {
+				if !malIDSet[relatedMapping.MAL] {
+					malIDSet[relatedMapping.MAL] = true
+					relatedMappings = append(relatedMappings, relatedMapping)
 				}
 			}
 		}
@@ -561,10 +615,10 @@ func applySeasonData(anime *entities.Anime, mapping *entities.Mapping) {
 		tmdbMappings, err := repositories.GetRelatedAnimeByTMDB(mapping.TMDB, mapping.MAL)
 		if err == nil && len(tmdbMappings) > 0 {
 			logger.Infof("AnimeService", "Found %d related anime via TMDB", len(tmdbMappings))
-			for _, m := range tmdbMappings {
-				if !malIDSet[m.MAL] {
-					malIDSet[m.MAL] = true
-					relatedMappings = append(relatedMappings, m)
+			for _, relatedMapping := range tmdbMappings {
+				if !malIDSet[relatedMapping.MAL] {
+					malIDSet[relatedMapping.MAL] = true
+					relatedMappings = append(relatedMappings, relatedMapping)
 				}
 			}
 		}
@@ -600,63 +654,14 @@ func applySeasonData(anime *entities.Anime, mapping *entities.Mapping) {
 		})
 
 		season := entities.Season{
-			MALID:    relatedMapping.MAL,
-			Synopsis: seasonAnime.Data.Synopsis,
-			Type:     seasonAnime.Data.Type,
-			Source:   seasonAnime.Data.Source,
-			Airing:   seasonAnime.Data.Airing,
-			Status:   seasonAnime.Data.Status,
-			Duration: seasonAnime.Data.Duration,
-			Season:   seasonAnime.Data.Season,
-			Year:     seasonAnime.Data.Year,
-		}
-
-		if seasonAnime.Data.Title != "" || seasonAnime.Data.TitleEnglish != "" || seasonAnime.Data.TitleJapanese != "" {
-			season.Title = &entities.Title{
-				Romaji:   seasonAnime.Data.Title,
-				English:  seasonAnime.Data.TitleEnglish,
-				Japanese: seasonAnime.Data.TitleJapanese,
-				Synonyms: seasonAnime.Data.TitleSynonyms,
-			}
-		}
-
-		if seasonAnime.Data.Images.JPG.ImageURL != "" {
-			season.Images = &entities.Images{
-				Small:    seasonAnime.Data.Images.JPG.SmallImageURL,
-				Large:    seasonAnime.Data.Images.JPG.LargeImageURL,
-				Original: seasonAnime.Data.Images.JPG.ImageURL,
-			}
-		}
-
-		season.Scores = &entities.Scores{
-			Score:      seasonAnime.Data.Score,
-			ScoredBy:   seasonAnime.Data.ScoredBy,
-			Rank:       seasonAnime.Data.Rank,
-			Popularity: seasonAnime.Data.Popularity,
-			Members:    seasonAnime.Data.Members,
-			Favorites:  seasonAnime.Data.Favorites,
-		}
-
-		if seasonAnime.Data.Aired.From != "" || seasonAnime.Data.Aired.To != "" {
-			season.AiringStatus = &entities.AiringStatus{
-				String: seasonAnime.Data.Aired.String,
-			}
-			if seasonAnime.Data.Aired.Prop.From.Year > 0 {
-				season.AiringStatus.From = &entities.Date{
-					Day:    seasonAnime.Data.Aired.Prop.From.Day,
-					Month:  seasonAnime.Data.Aired.Prop.From.Month,
-					Year:   seasonAnime.Data.Aired.Prop.From.Year,
-					String: seasonAnime.Data.Aired.From,
-				}
-			}
-			if seasonAnime.Data.Aired.Prop.To.Year > 0 {
-				season.AiringStatus.To = &entities.Date{
-					Day:    seasonAnime.Data.Aired.Prop.To.Day,
-					Month:  seasonAnime.Data.Aired.Prop.To.Month,
-					Year:   seasonAnime.Data.Aired.Prop.To.Year,
-					String: seasonAnime.Data.Aired.To,
-				}
-			}
+			MALID:         relatedMapping.MAL,
+			TitleEnglish:  seasonAnime.Data.TitleEnglish,
+			TitleRomaji:   seasonAnime.Data.Title,
+			ImageOriginal: seasonAnime.Data.Images.JPG.ImageURL,
+			Year:          seasonAnime.Data.Year,
+			SeasonName:    seasonAnime.Data.Season,
+			Type:          seasonAnime.Data.Type,
+			Status:        seasonAnime.Data.Status,
 		}
 
 		anime.Seasons = append(anime.Seasons, season)
@@ -665,9 +670,9 @@ func applySeasonData(anime *entities.Anime, mapping *entities.Mapping) {
 	sortSeasonsByChronology(allSeasons)
 
 	seasonNumberMap := make(map[int]int)
-	for i, s := range allSeasons {
-		seasonNumberMap[s.malID] = i + 1
-		if s.isCurrent {
+	for i, seasonEntry := range allSeasons {
+		seasonNumberMap[seasonEntry.malID] = i + 1
+		if seasonEntry.isCurrent {
 			anime.SeasonNumber = i + 1
 		}
 	}
@@ -697,11 +702,11 @@ func getSeasonOrder(season string) int {
 func sortSeasonsByChronology(seasons []seasonInfo) {
 	for i := 0; i < len(seasons)-1; i++ {
 		for j := 0; j < len(seasons)-i-1; j++ {
-			s1, s2 := seasons[j], seasons[j+1]
+			current, next := seasons[j], seasons[j+1]
 
-			if s1.year > s2.year {
+			if current.year > next.year {
 				seasons[j], seasons[j+1] = seasons[j+1], seasons[j]
-			} else if s1.year == s2.year && s1.seasonOrder > s2.seasonOrder {
+			} else if current.year == next.year && current.seasonOrder > next.seasonOrder {
 				seasons[j], seasons[j+1] = seasons[j+1], seasons[j]
 			}
 		}
@@ -718,6 +723,18 @@ func saveAnime(anime *entities.Anime, skipTimeMap map[string][]entities.EpisodeS
 	for i := range anime.Genres {
 		if err := repositories.CreateOrUpdateGenre(&anime.Genres[i]); err != nil {
 			logger.Warnf("AnimeService", "Failed to save genre: %v", err)
+		}
+	}
+
+	for i := range anime.Themes {
+		if err := repositories.CreateOrUpdateGenre(&anime.Themes[i]); err != nil {
+			logger.Warnf("AnimeService", "Failed to save theme: %v", err)
+		}
+	}
+
+	for i := range anime.Demographics {
+		if err := repositories.CreateOrUpdateGenre(&anime.Demographics[i]); err != nil {
+			logger.Warnf("AnimeService", "Failed to save demographic: %v", err)
 		}
 	}
 
@@ -748,10 +765,10 @@ func saveAnime(anime *entities.Anime, skipTimeMap map[string][]entities.EpisodeS
 			logger.Warnf("AnimeService", "Failed to save episodes: %v", err)
 		}
 		for i := range anime.Episodes {
-			ep := &anime.Episodes[i]
-			if ep.StreamInfo != nil && ep.EpisodeID != "" {
-				if err := repositories.SaveEpisodeStreamInfo(anime.ID, ep.EpisodeID, ep.StreamInfo); err != nil {
-					logger.Warnf("AnimeService", "Failed to save stream info for episode %s: %v", ep.EpisodeID, err)
+			episode := &anime.Episodes[i]
+			if episode.StreamInfo != nil && episode.EpisodeID != "" {
+				if err := repositories.SaveEpisodeStreamInfo(anime.ID, episode.EpisodeID, episode.StreamInfo); err != nil {
+					logger.Warnf("AnimeService", "Failed to save stream info for episode %s: %v", episode.EpisodeID, err)
 				}
 			}
 		}

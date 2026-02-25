@@ -112,33 +112,29 @@ type JikanSingleAnime struct {
 	Season         string                      `json:"season"`
 	Year           int                         `json:"year"`
 	Images         JikanGenericImageEntity     `json:"images"`
+	Trailer        JikanAnimeTrailer           `json:"trailer"`
+	Approved       bool                        `json:"approved"`
+	Titles         []JikanGenericTitleEntity   `json:"titles"`
+	Aired          JikanAiringSchedule         `json:"aired"`
+	Duration       string                      `json:"duration"`
+	Rating         string                      `json:"rating"`
+	Background     string                      `json:"background"`
+	Broadcast      JikanBroadcastSchedule      `json:"broadcast"`
 	Genres         []JikanGenericRelatedEntity `json:"genres"`
 	ExplicitGenres []JikanGenericRelatedEntity `json:"explicit_genres"`
+	Themes         []JikanGenericRelatedEntity `json:"themes"`
+	Demographics   []JikanGenericRelatedEntity `json:"demographics"`
 	Producers      []JikanGenericRelatedEntity `json:"producers"`
 	Licensors      []JikanGenericRelatedEntity `json:"licensors"`
 	Studios        []JikanGenericRelatedEntity `json:"studios"`
-}
-
-type JikanFullSingleAnime struct {
-	JikanSingleAnime
-	Trailer      JikanAnimeTrailer           `json:"trailer"`
-	Approved     bool                        `json:"approved"`
-	Titles       []JikanGenericTitleEntity   `json:"titles"`
-	Aired        JikanAiringSchedule         `json:"aired"`
-	Duration     string                      `json:"duration"`
-	Rating       string                      `json:"rating"`
-	Background   string                      `json:"background"`
-	Broadcast    JikanBroadcastSchedule      `json:"broadcast"`
-	Themes       []JikanGenericRelatedEntity `json:"themes"`
-	Demographics []JikanGenericRelatedEntity `json:"demographics"`
-	Relations    []JikanGenericRelation      `json:"relations"`
-	Theme        JikanAnimeTheme             `json:"theme"`
-	External     []JikanGenericURL           `json:"external"`
-	Streaming    []JikanGenericURL           `json:"streaming"`
+	Relations      []JikanGenericRelation      `json:"relations"`
+	Theme          JikanAnimeTheme             `json:"theme"`
+	External       []JikanGenericURL           `json:"external"`
+	Streaming      []JikanGenericURL           `json:"streaming"`
 }
 
 type JikanAnimeResponse struct {
-	Data JikanFullSingleAnime `json:"data"`
+	Data JikanSingleAnime `json:"data"`
 }
 
 type JikanAnimeSingleEpisode struct {

@@ -53,7 +53,7 @@ type PersonCharacterEntry struct {
 }
 
 type PersonVoiceRole struct {
-	PersonID          uint   `gorm:"primaryKey" json:"-"`
+	PersonID          uint   `gorm:"primaryKey;index" json:"-"`
 	AnimeMALID        int    `gorm:"primaryKey" json:"anime_mal_id,omitempty"`
 	CharacterMALID    int    `gorm:"primaryKey" json:"character_mal_id,omitempty"`
 	Role              string `json:"role,omitempty"`
@@ -66,7 +66,7 @@ type PersonVoiceRole struct {
 }
 
 type PersonAnimeCredit struct {
-	PersonID      uint   `gorm:"primaryKey" json:"-"`
+	PersonID      uint   `gorm:"primaryKey;index" json:"-"`
 	AnimeMALID    int    `gorm:"primaryKey" json:"mal_id,omitempty"`
 	Position      string `json:"position,omitempty"`
 	AnimeTitle    string `json:"title,omitempty"`
@@ -75,7 +75,7 @@ type PersonAnimeCredit struct {
 }
 
 type PersonMangaCredit struct {
-	PersonID      uint   `gorm:"primaryKey" json:"-"`
+	PersonID      uint   `gorm:"primaryKey;index" json:"-"`
 	MangaMALID    int    `gorm:"primaryKey" json:"mal_id,omitempty"`
 	Position      string `json:"position,omitempty"`
 	MangaTitle    string `json:"title,omitempty"`
@@ -84,13 +84,13 @@ type PersonMangaCredit struct {
 }
 
 type AnimeCharacter struct {
-	AnimeID     uint `gorm:"primaryKey"`
-	CharacterID uint `gorm:"primaryKey"`
+	AnimeID     uint   `gorm:"primaryKey;index"`
+	CharacterID uint   `gorm:"primaryKey"`
 	Role        string
 }
 
 type CharacterVoiceActor struct {
-	CharacterID uint    `gorm:"primaryKey" json:"-"`
+	CharacterID uint    `gorm:"primaryKey;index" json:"-"`
 	PersonID    uint    `gorm:"primaryKey" json:"-"`
 	Language    string  `json:"language,omitempty"`
 	Person      *Person `gorm:"foreignKey:PersonID;references:ID" json:"person,omitempty"`

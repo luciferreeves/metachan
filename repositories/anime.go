@@ -23,17 +23,9 @@ func GetAnime[T idType](maptype enums.MappingType, id T) (entities.Anime, error)
 
 	result := DB.
 		Preload("Mapping").
-		Preload("Title").
-		Preload("Images").
-		Preload("Covers").
-		Preload("Logos").
-		Preload("Scores").
-		Preload("AiringStatus").
-		Preload("AiringStatus.From").
-		Preload("AiringStatus.To").
-		Preload("Broadcast").
-		Preload("NextAiring").
 		Preload("Genres").
+		Preload("Themes").
+		Preload("Demographics").
 		Preload("Producers").
 		Preload("Producers.Image").
 		Preload("Producers.Titles").
@@ -47,19 +39,12 @@ func GetAnime[T idType](maptype enums.MappingType, id T) (entities.Anime, error)
 		Preload("Licensors.Titles").
 		Preload("Licensors.ExternalURLs").
 		Preload("Episodes").
-		Preload("Episodes.Title").
 		Preload("Episodes.SkipTimes").
 		Preload("Episodes.StreamInfo").
 		Preload("Episodes.StreamInfo.SubSources").
 		Preload("Episodes.StreamInfo.DubSources").
 		Preload("Schedule").
 		Preload("Seasons").
-		Preload("Seasons.Title").
-		Preload("Seasons.Images").
-		Preload("Seasons.Scores").
-		Preload("Seasons.AiringStatus").
-		Preload("Seasons.AiringStatus.From").
-		Preload("Seasons.AiringStatus.To").
 		Where("mapping_id = ?", mapping.ID).
 		First(&anime)
 
@@ -110,12 +95,7 @@ func SaveAnimeEpisodes(animeID uint, episodes []entities.Episode) error {
 		var existing entities.Episode
 		if DB.Where("episode_id = ?", ep.EpisodeID).First(&existing).Error == nil {
 			ep.ID = existing.ID
-			ep.TitleID = existing.TitleID
-			DB.Model(ep).Omit("SkipTimes", "StreamInfo", "Title").Updates(ep)
-			if ep.Title != nil && existing.TitleID != 0 {
-				ep.Title.ID = existing.TitleID
-				DB.Save(ep.Title)
-			}
+			DB.Model(ep).Omit("SkipTimes", "StreamInfo").Updates(ep)
 		} else {
 			DB.Session(&gorm.Session{FullSaveAssociations: true}).
 				Omit("SkipTimes", "StreamInfo").
@@ -158,7 +138,6 @@ func GetAnimeEpisode[T idType](maptype enums.MappingType, id T, episodeID string
 
 	var episode entities.Episode
 	result := DB.
-		Preload("Title").
 		Preload("SkipTimes").
 		Preload("StreamInfo").
 		Preload("StreamInfo.SubSources").
@@ -192,7 +171,6 @@ func GetAnimeEpisodes[T idType](maptype enums.MappingType, id T) ([]entities.Epi
 
 	var episodes []entities.Episode
 	result := DB.
-		Preload("Title").
 		Preload("SkipTimes").
 		Preload("StreamInfo").
 		Preload("StreamInfo.SubSources").
@@ -240,9 +218,7 @@ func GetAiringAnime() ([]entities.Anime, error) {
 
 	result := DB.
 		Where("airing = ?", true).
-		Preload("NextAiring").
 		Preload("Schedule").
-		Preload("Title").
 		Find(&anime)
 
 	if result.Error != nil {
