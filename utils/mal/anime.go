@@ -17,8 +17,8 @@ var (
 	youtubeIDPattern            = regexp.MustCompile(`/embed/([a-zA-Z0-9_-]+)`)
 	themeSongTitlePattern       = regexp.MustCompile(`"(.+?)"`)
 	themeSongArtistPattern      = regexp.MustCompile(`by\s+(.+?)(?:\s+\(eps|\s*$)`)
-	themeSongEpisodesPattern    = regexp.MustCompile(`\(eps\s+(\d+)(?:-(\d+))?\)`)
-	japaneseTextInParensPattern = regexp.MustCompile(`\(([^\x00-\x7F]+)\)`)
+	themeSongEpisodesPattern    = regexp.MustCompile(`\(eps\s+([\d,\-\s]+)\)`)
+	japaneseTextInParensPattern = regexp.MustCompile(`\(([^)]*[^\x00-\x7F][^)]*)\)`)
 	broadcastTimePattern        = regexp.MustCompile(`(\w+)s?\s+at\s+(\d{2}:\d{2})\s+\((\w+)\)`)
 	imageResizePrefixPattern    = regexp.MustCompile(`/r/\d+x\d+`)
 	leadingIndexPattern         = regexp.MustCompile(`^#?\d+:?\s*`)
@@ -33,6 +33,8 @@ func extractSidebarValue(document *goquery.Document, label string) string {
 		if strings.TrimSpace(selection.Text()) == label {
 			parentClone := selection.Parent().Clone()
 			parentClone.Find("span.dark_text").Remove()
+			parentClone.Find("sup").Remove()
+			parentClone.Find("div").Remove()
 			extractedValue = strings.TrimSpace(parentClone.Text())
 		}
 	})
@@ -86,36 +88,20 @@ func buildImageFromBaseURL(rawURL string) Image {
 	pathBase := cleanedURL[:extensionIndex]
 
 	return Image{
-		JPG: ImageFormat{
-			Small:    pathBase + "t.jpg",
-			Medium:   pathBase + ".jpg",
-			Large:    pathBase + "l.jpg",
-			Original: pathBase + ".jpg",
-		},
-		WEBP: ImageFormat{
-			Small:    pathBase + "t.webp",
-			Medium:   pathBase + ".webp",
-			Large:    pathBase + "l.webp",
-			Original: pathBase + ".webp",
-		},
+		Small:    pathBase + "t.jpg",
+		Medium:   pathBase + ".jpg",
+		Large:    pathBase + "l.jpg",
+		Original: pathBase + ".jpg",
 	}
 }
 
 func buildYouTubeThumbnail(videoID string) Image {
 	thumbnailBase := fmt.Sprintf("https://img.youtube.com/vi/%s", videoID)
 	return Image{
-		JPG: ImageFormat{
-			Small:    thumbnailBase + "/default.jpg",
-			Medium:   thumbnailBase + "/mqdefault.jpg",
-			Large:    thumbnailBase + "/hqdefault.jpg",
-			Original: thumbnailBase + "/maxresdefault.jpg",
-		},
-		WEBP: ImageFormat{
-			Small:    thumbnailBase + "/default.webp",
-			Medium:   thumbnailBase + "/mqdefault.webp",
-			Large:    thumbnailBase + "/hqdefault.webp",
-			Original: thumbnailBase + "/maxresdefault.webp",
-		},
+		Small:    thumbnailBase + "/default.jpg",
+		Medium:   thumbnailBase + "/mqdefault.jpg",
+		Large:    thumbnailBase + "/hqdefault.jpg",
+		Original: thumbnailBase + "/maxresdefault.jpg",
 	}
 }
 
@@ -210,18 +196,38 @@ func parseAnimeSynopsis(document *goquery.Document) string {
 }
 
 func parseAnimeBackground(document *goquery.Document) string {
+	backgroundHeading := document.Find("h2#background")
+	if backgroundHeading.Length() == 0 {
+		return ""
+	}
+
+	wrapperDiv := backgroundHeading.Parent()
+	container := wrapperDiv.Parent()
+
+	var foundWrapper bool
+	var reachedEnd bool
 	var backgroundParts []string
-	document.Find("h2").Each(func(index int, heading *goquery.Selection) {
-		if strings.TrimSpace(heading.Text()) != "Background" {
+
+	container.Contents().Each(func(index int, node *goquery.Selection) {
+		if reachedEnd {
 			return
 		}
-		heading.NextUntil("h2").Each(func(siblingIndex int, sibling *goquery.Selection) {
-			text := strings.TrimSpace(sibling.Text())
-			if text != "" && !strings.Contains(text, "No background information") {
-				backgroundParts = append(backgroundParts, text)
+		if !foundWrapper {
+			if node.Find("h2#background").Length() > 0 {
+				foundWrapper = true
 			}
-		})
+			return
+		}
+		if node.HasClass("border_top") {
+			reachedEnd = true
+			return
+		}
+		text := strings.TrimSpace(node.Text())
+		if text != "" && !strings.Contains(text, "No background information") {
+			backgroundParts = append(backgroundParts, text)
+		}
 	})
+
 	return strings.Join(backgroundParts, " ")
 }
 
@@ -289,25 +295,41 @@ func parseAnimeBroadcast(document *goquery.Document) Broadcast {
 
 func parseAnimeThemeSongs(document *goquery.Document, containerClass string) []ThemeSong {
 	var themeSongs []ThemeSong
-	document.Find(fmt.Sprintf("div.%s table tr", containerClass)).Each(func(index int, row *goquery.Selection) {
-		songText := strings.TrimSpace(row.Find("td.theme-song").Text())
-		if songText == "" || strings.Contains(songText, "No opening themes") || strings.Contains(songText, "No ending themes") {
+	document.Find(fmt.Sprintf("div.%s > table tr", containerClass)).Each(func(index int, row *goquery.Selection) {
+		songCell := row.Find("td").Eq(1)
+		if songCell.Length() == 0 {
+			songCell = row.Find("td").First()
+		}
+
+		if songCell.Find("span.theme-song-index").Length() == 0 {
+			cellText := strings.TrimSpace(songCell.Text())
+			if cellText == "" || !strings.Contains(cellText, `"`) {
+				return
+			}
+		}
+
+		cellText := strings.TrimSpace(songCell.Text())
+		if cellText == "" || strings.Contains(cellText, "No opening themes") || strings.Contains(cellText, "No ending themes") {
 			return
 		}
 
-		themeSong := parseThemeSongText(songText)
+		themeSong := parseThemeSongText(cellText)
 
-		row.Find("td.theme-song-artist a").Each(func(linkIndex int, linkElement *goquery.Selection) {
-			href, exists := linkElement.Attr("href")
-			if !exists || href == "" {
+		songCell.Find("input[type=hidden]").Each(func(inputIndex int, inputElement *goquery.Selection) {
+			inputID, _ := inputElement.Attr("id")
+			inputValue, _ := inputElement.Attr("value")
+			if inputValue == "" {
 				return
 			}
-			siteName := strings.TrimSpace(linkElement.Text())
-			if siteName == "" {
-				siteName, _ = linkElement.Attr("title")
-			}
-			if siteName != "" {
-				themeSong.Links = append(themeSong.Links, ExternalLink{Name: siteName, URL: href})
+			switch {
+			case strings.HasPrefix(inputID, "spotify_url"):
+				themeSong.Links = append(themeSong.Links, ExternalLink{Name: "Spotify", URL: inputValue})
+			case strings.HasPrefix(inputID, "apple_url"):
+				themeSong.Links = append(themeSong.Links, ExternalLink{Name: "Apple Music", URL: inputValue})
+			case strings.HasPrefix(inputID, "amazon_url"):
+				themeSong.Links = append(themeSong.Links, ExternalLink{Name: "Amazon Music", URL: inputValue})
+			case strings.HasPrefix(inputID, "youtube_url"):
+				themeSong.Links = append(themeSong.Links, ExternalLink{Name: "YouTube", URL: inputValue})
 			}
 		})
 
@@ -322,11 +344,10 @@ func parseThemeSongText(rawText string) ThemeSong {
 
 	episodeMatches := themeSongEpisodesPattern.FindStringSubmatch(text)
 	if len(episodeMatches) > 1 {
-		themeSong.Episodes.Start, _ = strconv.Atoi(episodeMatches[1])
-		if len(episodeMatches) > 2 && episodeMatches[2] != "" {
-			themeSong.Episodes.End, _ = strconv.Atoi(episodeMatches[2])
-		} else {
-			themeSong.Episodes.End = themeSong.Episodes.Start
+		allNumbers := regexp.MustCompile(`\d+`).FindAllString(episodeMatches[1], -1)
+		if len(allNumbers) > 0 {
+			themeSong.Episodes.Start, _ = strconv.Atoi(allNumbers[0])
+			themeSong.Episodes.End, _ = strconv.Atoi(allNumbers[len(allNumbers)-1])
 		}
 	}
 
@@ -352,12 +373,15 @@ func parseThemeSongText(rawText string) ThemeSong {
 
 func parseAnimeExternalLinks(document *goquery.Document) []ExternalLink {
 	var externalLinks []ExternalLink
-	document.Find("div.external_links a.link").Each(func(index int, linkElement *goquery.Selection) {
+	document.Find("div.external_links a").Each(func(index int, linkElement *goquery.Selection) {
 		href, exists := linkElement.Attr("href")
-		if !exists || href == "" {
+		if !exists || href == "" || strings.HasPrefix(href, "#") || strings.HasPrefix(href, "javascript:") {
 			return
 		}
-		linkName := strings.TrimSpace(linkElement.Text())
+		linkName := strings.TrimSpace(linkElement.Find("div.caption").Text())
+		if linkName == "" {
+			linkName = strings.TrimSpace(linkElement.Text())
+		}
 		if linkName != "" {
 			externalLinks = append(externalLinks, ExternalLink{Name: linkName, URL: href})
 		}
@@ -367,24 +391,18 @@ func parseAnimeExternalLinks(document *goquery.Document) []ExternalLink {
 
 func parseAnimeStreamingLinks(document *goquery.Document) []ExternalLink {
 	var streamingLinks []ExternalLink
-	document.Find("h2").Each(func(index int, heading *goquery.Selection) {
-		headingText := strings.TrimSpace(heading.Text())
-		if headingText != "Available At" && headingText != "Streaming Platforms" {
+	document.Find("div.broadcasts a.broadcast-item").Each(func(index int, linkElement *goquery.Selection) {
+		href, exists := linkElement.Attr("href")
+		if !exists || href == "" || strings.HasPrefix(href, "javascript:") {
 			return
 		}
-		heading.NextUntil("h2").Find("a").Each(func(linkIndex int, linkElement *goquery.Selection) {
-			href, exists := linkElement.Attr("href")
-			if !exists || href == "" {
-				return
-			}
-			linkName := strings.TrimSpace(linkElement.Text())
-			if linkName == "" {
-				linkName, _ = linkElement.Attr("title")
-			}
-			if linkName != "" {
-				streamingLinks = append(streamingLinks, ExternalLink{Name: linkName, URL: href})
-			}
-		})
+		linkName, _ := linkElement.Attr("title")
+		if linkName == "" {
+			linkName = strings.TrimSpace(linkElement.Find("div.caption").Text())
+		}
+		if linkName != "" {
+			streamingLinks = append(streamingLinks, ExternalLink{Name: linkName, URL: href})
+		}
 	})
 	return streamingLinks
 }
@@ -494,6 +512,16 @@ func parseAnimeDocument(document *goquery.Document, malID int) Anime {
 	}
 }
 
+func fixThemeSongEpisodeRanges(themeSongs []ThemeSong, totalEpisodes int) {
+	if len(themeSongs) != 1 || totalEpisodes <= 0 {
+		return
+	}
+	if themeSongs[0].Episodes.Start == 0 && themeSongs[0].Episodes.End == 0 {
+		themeSongs[0].Episodes.Start = 1
+		themeSongs[0].Episodes.End = totalEpisodes
+	}
+}
+
 func GetAnimeByMALID(malID int) (*Anime, error) {
 	animePageURL := fmt.Sprintf("%s/anime/%d", malBaseURL, malID)
 	animeDocument, fetchErr := makeRequest(animePageURL)
@@ -502,8 +530,14 @@ func GetAnimeByMALID(malID int) (*Anime, error) {
 		return nil, fmt.Errorf("failed to fetch anime page for MAL ID %d: %w", malID, fetchErr)
 	}
 
+	logger.Debugf("MALScraper", "Parsing anime page for MAL ID %d", malID)
 	anime := parseAnimeDocument(animeDocument, malID)
+	logger.Debugf("MALScraper", "Parsed anime page: Title=%q, EpisodeCount=%d", anime.Title.Romaji, anime.EpisodeCount)
 
+	fixThemeSongEpisodeRanges(anime.Openings, anime.EpisodeCount)
+	fixThemeSongEpisodeRanges(anime.Endings, anime.EpisodeCount)
+
+	logger.Debugf("MALScraper", "Fetching videos page for MAL ID %d", malID)
 	videosPageURL := fmt.Sprintf("%s/anime/%d/_/video", malBaseURL, malID)
 	videosDocument, videosFetchErr := makeRequest(videosPageURL)
 	if videosFetchErr != nil {
@@ -511,6 +545,16 @@ func GetAnimeByMALID(malID int) (*Anime, error) {
 	} else {
 		anime.Videos = parsePromotionalVideos(videosDocument)
 		anime.MusicVideos = parseMusicVideos(videosDocument)
+		logger.Debugf("MALScraper", "Parsed videos: %d promotional, %d music", len(anime.Videos), len(anime.MusicVideos))
+	}
+
+	logger.Debugf("MALScraper", "Fetching episodes for MAL ID %d", malID)
+	episodes, episodesFetchErr := GetAnimeEpisodesByMALID(malID)
+	if episodesFetchErr != nil {
+		logger.Warnf("MALClient", "Failed to fetch episodes for MAL ID %d: %v", malID, episodesFetchErr)
+	} else {
+		anime.Episodes = episodes
+		logger.Debugf("MALScraper", "Fetched %d episodes for MAL ID %d", len(episodes), malID)
 	}
 
 	return &anime, nil

@@ -67,16 +67,6 @@ func makeRequest(targetURL string) (*goquery.Document, error) {
 			if parseErr != nil {
 				return nil, fmt.Errorf("failed to parse HTML from %s: %w", targetURL, parseErr)
 			}
-
-			pageTitle := document.Find("title").Text()
-			logger.Debugf("MALClient", "Page title for %s: %q", targetURL, pageTitle)
-
-			htmlContent, _ := document.Html()
-			if len(htmlContent) > 500 {
-				htmlContent = htmlContent[:500]
-			}
-			logger.Debugf("MALClient", "HTML preview for %s: %s", targetURL, htmlContent)
-
 			return document, nil
 		}
 

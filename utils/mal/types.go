@@ -1,15 +1,10 @@
 package mal
 
-type ImageFormat struct {
+type Image struct {
 	Small    string
 	Medium   string
 	Large    string
 	Original string
-}
-
-type Image struct {
-	JPG  ImageFormat
-	WEBP ImageFormat
 }
 
 type Title struct {
