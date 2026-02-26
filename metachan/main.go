@@ -8,7 +8,7 @@ import (
 	"metachan/router"
 	"metachan/tasks"
 	"metachan/utils/api/aniskip"
-	"metachan/utils/api/jikan"
+	"metachan/utils/mal"
 	"metachan/utils/logger"
 	"os"
 	"os/signal"
@@ -56,7 +56,7 @@ func main() {
 	}
 
 	tasks.GlobalTaskManager.StopAllTasks()
-	jikan.StopRateLimiters()
+	mal.StopRateLimiters()
 	aniskip.StopRateLimiters()
 
 	if sqlDB, err := database.DB.DB(); err == nil {

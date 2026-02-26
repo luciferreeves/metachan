@@ -2,26 +2,24 @@ package controllers
 
 import (
 	"errors"
-	"metachan/enums"
-	"metachan/repositories"
+	"metachan/utils/mal"
 	"metachan/utils/meta"
+	"strconv"
 
 	"github.com/gofiber/fiber/v2"
 )
 
 func GetAnime(c *fiber.Ctx) error {
-	id := meta.Request(c).MustHave().Param("id")
-	provider := meta.Request(c).Default("mal").Query("provider")
+	idString := meta.Request(c).MustHave().Param("id")
 
-	switch provider {
-	case "mal", "anilist":
-	default:
-		return BadRequest(c, errors.New("invalid provider"))
+	malID, parseErr := strconv.Atoi(idString)
+	if parseErr != nil {
+		return BadRequest(c, errors.New("invalid MAL ID"))
 	}
 
-	anime, err := repositories.GetAnime(enums.MappingType(provider), id)
-	if err != nil {
-		return NotFound(c, err)
+	anime, fetchErr := mal.GetAnimeByMALID(malID)
+	if fetchErr != nil {
+		return NotFound(c, fetchErr)
 	}
 
 	return c.JSON(anime)
